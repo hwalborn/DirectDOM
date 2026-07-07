@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DirectDOM</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <h1 class="header__title">DirectDOM</h1>
+        <span id="env-badge" class="badge badge--unknown">—</span>
+      </header>
+
+      <main id="main-view">
+        <!-- Chat view -->
+        <!-- TODO: Advanced → LLM → Provider / Model selection -->
+        <section id="chat-view" class="view view--active">
+          <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
+          <div id="selected-element" class="selected-element hidden">
+            <span class="selected-element__label">Selected:</span>
+            <code id="selected-selector" class="selected-element__selector"></code>
+          </div>
+          <div class="chat-input-row">
+            <button
+              id="pick-btn"
+              type="button"
+              class="btn btn--secondary"
+              aria-label="Pick element on page"
+              title="Pick element"
+            >
+              ⊕
+            </button>
+            <input
+              id="chat-input"
+              type="text"
+              class="chat-input"
+              placeholder="Describe a change…"
+              aria-label="Chat message"
+            />
+            <button id="send-btn" type="button" class="btn btn--primary">Send</button>
+          </div>
+          <div id="ledger-panel" class="ledger-panel">
+            <h2 class="ledger-panel__title">Changes (<span id="ledger-count">0</span>)</h2>
+            <ul id="ledger-list" class="ledger-list"></ul>
+          </div>
+          <button id="continue-btn" type="button" class="btn btn--primary btn--full" disabled>
+            Continue
+          </button>
+        </section>
+
+        <!-- Continue / metadata view -->
+        <section id="continue-view" class="view">
+          <h2 class="view__title">Link artifacts</h2>
+          <form id="metadata-form" class="form">
+            <label class="form__label">
+              JIRA project key <span class="required">*</span>
+              <input
+                id="jira-project"
+                type="text"
+                class="form__input"
+                placeholder="e.g. FE"
+                required
+                aria-required="true"
+              />
+            </label>
+            <label class="form__label">
+              Existing JIRA ticket(s)
+              <input
+                id="jira-tickets"
+                type="text"
+                class="form__input"
+                placeholder="FE-123, FE-456"
+              />
+            </label>
+            <label class="form__label">
+              Issue type
+              <select id="jira-issue-type" class="form__input">
+                <option value="Task" selected>Task</option>
+                <option value="Story">Story</option>
+                <option value="Bug">Bug</option>
+              </select>
+            </label>
+            <label class="form__label">
+              Google Doc URL (optional)
+              <input
+                id="google-doc"
+                type="url"
+                class="form__input"
+                placeholder="Uses PRD template if empty"
+              />
+            </label>
+            <label class="form__label">
+              Figma URL (optional)
+              <input id="figma-url" type="url" class="form__input" placeholder="https://figma.com/..." />
+            </label>
+            <label class="form__label">
+              Summary
+              <input id="summary" type="text" class="form__input" placeholder="Auto-filled from changes" />
+            </label>
+          </form>
+          <div class="btn-row">
+            <button id="back-btn" type="button" class="btn btn--secondary">Back</button>
+            <button id="submit-btn" type="button" class="btn btn--primary">Submit</button>
+          </div>
+        </section>
+
+        <!-- Job status view -->
+        <section id="job-view" class="view">
+          <h2 class="view__title">Submitting…</h2>
+          <ul id="job-steps" class="job-steps"></ul>
+          <div id="job-result" class="job-result hidden"></div>
+          <button id="new-session-btn" type="button" class="btn btn--secondary btn--full hidden">
+            New session
+          </button>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

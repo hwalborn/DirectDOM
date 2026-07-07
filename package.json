@@ -1,0 +1,25 @@
+{
+  "name": "directdom",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chrome extension + cloud backend for live DOM edits synced to JIRA, Google Docs, and GitHub PRs",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "yarn workspace @directdom/shared build && yarn workspace @directdom/codegen build && yarn workspace @directdom/backend build && yarn workspace @directdom/extension build",
+    "dev:backend": "yarn workspace @directdom/backend dev",
+    "dev:extension": "yarn workspace @directdom/extension dev",
+    "typecheck": "yarn workspaces run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dogfood": "node scripts/dogfood.mjs",
+    "update-prd": "yarn workspace @directdom/backend tsx src/scripts/update-prd.ts"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "version": "1.0.0",
+  "components": [
+    {
+      "name": "Button",
+      "importPath": "@/components/Button",
+      "storybookId": "components-button--primary",
+      "storybookUrl": "https://adminv2.1stdibs.com/internal/style-guide/?path=/docs/components-button--primary"
+    },
+    {
+      "name": "Checkbox",
+      "importPath": "@/components/Checkbox",
+      "storybookId": "components-checkbox--default",
+      "storybookUrl": "https://adminv2.1stdibs.com/internal/style-guide/?path=/docs/components-checkbox--default"
+    },
+    {
+      "name": "RadioGroup",
+      "importPath": "@/components/RadioGroup",
+      "storybookId": "components-radiogroup--default",
+      "storybookUrl": "https://adminv2.1stdibs.com/internal/style-guide/?path=/docs/components-radiogroup--default"
+    },
+    {
+      "name": "Input",
+      "importPath": "@/components/Input",
+      "storybookId": "components-input--default",
+      "storybookUrl": "https://adminv2.1stdibs.com/internal/style-guide/?path=/docs/components-input--default"
+    },
+    {
+      "name": "Icon",
+      "importPath": "@/components/Icon",
+      "storybookId": "icons-icons--docs",
+      "storybookUrl": "https://adminv2.1stdibs.com/internal/style-guide/?path=/docs/icons-icons--docs"
+    }
+  ],
+  "tailwindAllowlist": [
+    "text-*",
+    "bg-*",
+    "p-*",
+    "m-*",
+    "flex",
+    "grid",
+    "hidden",
+    "block",
+    "inline",
+    "inline-block",
+    "rounded",
+    "rounded-*",
+    "font-*",
+    "border",
+    "border-*",
+    "w-*",
+    "h-*",
+    "gap-*",
+    "items-*",
+    "justify-*"
+  ]
+}
