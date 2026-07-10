@@ -157,9 +157,6 @@ const handleSend = async (): Promise<void> => {
         })) as { changeRecord?: ChangeRecord };
 
         if (result?.changeRecord) {
-          ledger.push(result.changeRecord);
-          renderLedger();
-
           await apiFetch(`/sessions/${session.id}/ledger`, {
             method: "POST",
             body: JSON.stringify({ record: result.changeRecord }),
@@ -179,8 +176,10 @@ const handleSend = async (): Promise<void> => {
         );
       }
     } else if (data.changeRecord) {
-      ledger.push(data.changeRecord);
-      renderLedger();
+      await apiFetch(`/sessions/${session.id}/ledger`, {
+        method: "POST",
+        body: JSON.stringify({ record: data.changeRecord }),
+      });
     }
   } catch {
     addMessage("error", "Could not reach backend.");
@@ -355,9 +354,21 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!changeId) return;
 
     try {
-      await sendToActiveTab({ type: "UNDO_CHANGE", changeId });
-      ledger = ledger.filter((r) => r.id !== changeId);
-      renderLedger();
+      const result = (await sendToActiveTab({
+        type: "UNDO_CHANGE",
+        changeId,
+      })) as { ok?: boolean };
+
+      if (!result?.ok) {
+        addMessage("error", "Could not undo that change. The element may no longer exist.");
+        return;
+      }
+
+      if (session) {
+        await apiFetch(`/sessions/${session.id}/ledger/${changeId}`, {
+          method: "DELETE",
+        });
+      }
     } catch (error) {
       addMessage(
         "error",

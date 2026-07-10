@@ -1,5 +1,8 @@
 import type { ElementSnapshot, BoundingBox } from "@directdom/shared";
-import { normalizeDibsCssClassNames } from "@directdom/shared";
+import {
+  normalizeDibsCssClassNames,
+  resolveClassNameConflicts,
+} from "@directdom/shared";
 
 const STYLE_KEYS = [
   "color",
@@ -9,6 +12,64 @@ const STYLE_KEYS = [
   "padding",
   "margin",
 ] as const;
+
+const toKebabCase = (prop: string): string =>
+  prop.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
+
+const parseInlineStyleAttr = (style: string | undefined): Map<string, string> => {
+  const map = new Map<string, string>();
+  if (!style) return map;
+
+  for (const decl of style.split(";")) {
+    const colon = decl.indexOf(":");
+    if (colon === -1) continue;
+    const prop = decl.slice(0, colon).trim();
+    const val = decl.slice(colon + 1).trim();
+    if (prop) map.set(prop, val);
+  }
+
+  return map;
+};
+
+const applyInlineStyle = (
+  element: HTMLElement,
+  value: Record<string, string>,
+  mode: "merge" | "replace",
+): void => {
+  if (mode === "replace") {
+    element.style.cssText = "";
+  }
+
+  for (const [prop, val] of Object.entries(value)) {
+    element.style.setProperty(toKebabCase(prop), val);
+  }
+};
+
+const revertInlineStyle = (
+  element: HTMLElement,
+  before: ElementSnapshot,
+  patch: { value: Record<string, string>; mode: "merge" | "replace" },
+): void => {
+  if (patch.mode === "replace") {
+    const beforeStyle = before.attributes?.style;
+    if (beforeStyle) {
+      element.setAttribute("style", beforeStyle);
+    } else {
+      element.removeAttribute("style");
+    }
+    return;
+  }
+
+  const beforeStyles = parseInlineStyleAttr(before.attributes?.style);
+  for (const prop of Object.keys(patch.value)) {
+    const kebab = toKebabCase(prop);
+    if (beforeStyles.has(kebab)) {
+      element.style.setProperty(kebab, beforeStyles.get(kebab)!);
+    } else {
+      element.style.removeProperty(kebab);
+    }
+  }
+};
 
 export const getBoundingBox = (element: Element): BoundingBox => {
   const rect = element.getBoundingClientRect();
@@ -37,6 +98,16 @@ export const getElementSnapshot = (element: Element): ElementSnapshot => {
     attributes[attr.name] = attr.value;
   }
 
+  const htmlElement = element as HTMLElement;
+  if (htmlElement.style?.cssText) {
+    attributes.style = htmlElement.style.cssText;
+  }
+
+  const childTags = Array.from(element.children).map((child) =>
+    child.tagName.toLowerCase(),
+  );
+  const parent = element.parentElement;
+
   return {
     tagName: element.tagName.toLowerCase(),
     textContent: element.textContent?.trim().slice(0, 500) ?? "",
@@ -44,6 +115,14 @@ export const getElementSnapshot = (element: Element): ElementSnapshot => {
     attributes,
     computedStyles: getComputedStyleSubset(element),
     outerHTML: element.outerHTML.slice(0, 2000),
+    innerHTML: element.innerHTML.slice(0, 1500),
+    parentTagName: parent?.tagName.toLowerCase(),
+    parentClassName: parent?.className?.toString().slice(0, 200) || undefined,
+    childCount: element.children.length,
+    childTagSummary:
+      childTags.length > 0
+        ? `${childTags.slice(0, 8).join(", ")}${childTags.length > 8 ? ` (+${childTags.length - 8} more)` : ""} (${childTags.length})`
+        : undefined,
   };
 };
 
@@ -147,6 +226,95 @@ export const resolveElement = (selector: string): Element | null => {
   }
 };
 
+const replaceFirstMeaningfulText = (root: Element, newText: string): void => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  let node: Node | null = walker.nextNode();
+  while (node) {
+    const trimmed = node.textContent?.trim() ?? "";
+    if (trimmed.length > 0) {
+      node.textContent = node.textContent!.replace(trimmed, newText);
+      return;
+    }
+    node = walker.nextNode();
+  }
+};
+
+const applyLabelToElement = (element: Element, newLabel: string): void => {
+  const candidates = element.querySelectorAll(
+    '[aria-label], [role="combobox"], [role="button"], [role="listbox"], button, label, span',
+  );
+
+  for (const candidate of Array.from(candidates)) {
+    const ariaLabel = candidate.getAttribute("aria-label");
+    if (ariaLabel?.trim()) {
+      candidate.setAttribute("aria-label", newLabel);
+      if (candidate.textContent?.trim() === ariaLabel.trim()) {
+        candidate.textContent = newLabel;
+      }
+      return;
+    }
+
+    const text = candidate.textContent?.trim();
+    if (text && text.length > 0 && text.length < 120) {
+      candidate.textContent = newLabel;
+      return;
+    }
+  }
+
+  replaceFirstMeaningfulText(element, newLabel);
+};
+
+const prepareCloneForInsert = (clone: Element): Element => {
+  clone.removeAttribute("id");
+  clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+  clone.querySelectorAll("[data-testid]").forEach((el) => {
+    const testId = el.getAttribute("data-testid");
+    if (testId) {
+      el.setAttribute("data-testid", `${testId}-directdom-copy`);
+    }
+  });
+  return clone;
+};
+
+const parseHtmlToElement = (html: string): Element | null => {
+  const template = document.createElement("template");
+  template.innerHTML = html.trim();
+  return template.content.firstElementChild;
+};
+
+export const insertElementRelativeTo = (
+  reference: Element,
+  patch: Extract<import("@directdom/shared").DomPatch, { type: "insertElement" }>,
+): Element | null => {
+  let newElement: Element | null = null;
+
+  if (patch.mode === "html" && patch.html) {
+    newElement = parseHtmlToElement(patch.html);
+  } else {
+    newElement = prepareCloneForInsert(reference.cloneNode(true) as Element);
+    if (patch.textContent) {
+      applyLabelToElement(newElement, patch.textContent);
+    }
+  }
+
+  if (!newElement) return null;
+
+  switch (patch.position) {
+    case "before":
+      reference.insertAdjacentElement("beforebegin", newElement);
+      break;
+    case "inside":
+      reference.appendChild(newElement);
+      break;
+    case "after":
+    default:
+      reference.insertAdjacentElement("afterend", newElement);
+      break;
+  }
+
+  return newElement;
+};
+
 export const applyPatchToElement = (
   element: Element,
   patch: import("@directdom/shared").DomPatch,
@@ -158,18 +326,28 @@ export const applyPatchToElement = (
     case "className": {
       const normalizedValue = normalizeDibsCssClassNames(patch.value);
       if (patch.mode === "merge") {
-        const existing = new Set(
-          element.className.split(/\s+/).filter(Boolean),
+        element.className = resolveClassNameConflicts(
+          element.className,
+          normalizedValue,
         );
-        normalizedValue.split(/\s+/).forEach((c) => existing.add(c));
-        element.className = Array.from(existing).join(" ");
       } else {
         element.className = normalizedValue;
       }
       break;
     }
+    case "inlineStyle":
+      applyInlineStyle(element as HTMLElement, patch.value, patch.mode);
+      break;
     case "attribute":
-      element.setAttribute(patch.name, patch.value);
+      if (patch.name.toLowerCase() === "style") {
+        applyInlineStyle(
+          element as HTMLElement,
+          Object.fromEntries(parseInlineStyleAttr(patch.value)),
+          "merge",
+        );
+      } else {
+        element.setAttribute(patch.name, patch.value);
+      }
       break;
     case "swapElement":
       if (patch.html) {
@@ -180,6 +358,8 @@ export const applyPatchToElement = (
           element.replaceWith(newNode);
         }
       }
+      break;
+    case "insertElement":
       break;
   }
 };
@@ -193,11 +373,30 @@ export const revertPatch = (
     case "textContent":
       element.textContent = before.textContent ?? "";
       break;
-    case "className":
-      element.className = before.className ?? "";
+    case "className": {
+      if (patch.mode === "merge") {
+        const toRemove = new Set(
+          normalizeDibsCssClassNames(patch.value).split(/\s+/).filter(Boolean),
+        );
+        element.className = element.className
+          .split(/\s+/)
+          .filter((cls) => !toRemove.has(cls))
+          .join(" ");
+      } else {
+        element.className = before.className ?? "";
+      }
+      break;
+    }
+    case "inlineStyle":
+      revertInlineStyle(element as HTMLElement, before, patch);
       break;
     case "attribute":
-      if (before.attributes?.[patch.name] !== undefined) {
+      if (patch.name.toLowerCase() === "style") {
+        revertInlineStyle(element as HTMLElement, before, {
+          value: Object.fromEntries(parseInlineStyleAttr(patch.value)),
+          mode: "merge",
+        });
+      } else if (before.attributes?.[patch.name] !== undefined) {
         element.setAttribute(patch.name, before.attributes[patch.name]);
       } else {
         element.removeAttribute(patch.name);
@@ -212,6 +411,9 @@ export const revertPatch = (
           element.replaceWith(newNode);
         }
       }
+      break;
+    case "insertElement":
+      element.remove();
       break;
   }
 };

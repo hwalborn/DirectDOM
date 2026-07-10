@@ -35,7 +35,25 @@ export const appendLedgerRecord = (
 ): Session | undefined => {
   const session = sessions.get(sessionId);
   if (!session) return undefined;
+  if (session.ledger.some((entry) => entry.id === record.id)) {
+    return session;
+  }
   session.ledger.push(record);
+  session.updatedAt = Date.now();
+  return session;
+};
+
+export const removeLedgerRecord = (
+  sessionId: string,
+  changeId: string,
+): Session | undefined => {
+  const session = sessions.get(sessionId);
+  if (!session) return undefined;
+  const nextLedger = session.ledger.filter((entry) => entry.id !== changeId);
+  if (nextLedger.length === session.ledger.length) {
+    return session;
+  }
+  session.ledger = nextLedger;
   session.updatedAt = Date.now();
   return session;
 };

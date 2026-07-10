@@ -28,13 +28,20 @@ export const ElementSnapshotSchema = z.object({
     })
     .optional(),
   outerHTML: z.string().optional(),
+  innerHTML: z.string().optional(),
+  parentTagName: z.string().optional(),
+  parentClassName: z.string().optional(),
+  childCount: z.number().optional(),
+  childTagSummary: z.string().optional(),
 });
 export type ElementSnapshot = z.infer<typeof ElementSnapshotSchema>;
 
 export const PatchTypeSchema = z.enum([
   "textContent",
   "className",
+  "inlineStyle",
   "attribute",
+  "insertElement",
   "swapElement",
 ]);
 export type PatchType = z.infer<typeof PatchTypeSchema>;
@@ -42,7 +49,9 @@ export type PatchType = z.infer<typeof PatchTypeSchema>;
 const DOM_PATCH_TYPES = [
   "textContent",
   "className",
+  "inlineStyle",
   "attribute",
+  "insertElement",
   "swapElement",
 ] as const;
 
@@ -58,12 +67,19 @@ const PATCH_TYPE_ALIASES: Record<string, (typeof DOM_PATCH_TYPES)[number]> = {
   classes: "className",
   tailwind: "className",
   css: "className",
-  style: "className",
   attr: "attribute",
   swap: "swapElement",
   swapelement: "swapElement",
   component: "swapElement",
   replaceelement: "swapElement",
+  insert: "insertElement",
+  insertelement: "insertElement",
+  duplicate: "insertElement",
+  clone: "insertElement",
+  add: "insertElement",
+  append: "insertElement",
+  inlinestyle: "inlineStyle",
+  inline: "inlineStyle",
 };
 
 const isDomPatchType = (
@@ -81,15 +97,22 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
   let type = typeof obj.type === "string" ? obj.type : undefined;
 
   if (type) {
-    const alias = PATCH_TYPE_ALIASES[type.toLowerCase()];
-    if (alias) {
-      type = alias;
+    if (type.toLowerCase() === "style") {
+      type =
+        typeof obj.value === "object" && obj.value !== null
+          ? "inlineStyle"
+          : "className";
     } else {
-      const caseMatch = DOM_PATCH_TYPES.find(
-        (patchType) => patchType.toLowerCase() === type!.toLowerCase(),
-      );
-      if (caseMatch) {
-        type = caseMatch;
+      const alias = PATCH_TYPE_ALIASES[type.toLowerCase()];
+      if (alias) {
+        type = alias;
+      } else {
+        const caseMatch = DOM_PATCH_TYPES.find(
+          (patchType) => patchType.toLowerCase() === type!.toLowerCase(),
+        );
+        if (caseMatch) {
+          type = caseMatch;
+        }
       }
     }
   }
@@ -97,6 +120,18 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
   if (!type || !isDomPatchType(type)) {
     if (obj.componentName || obj.component) {
       type = "swapElement";
+    } else if (
+      obj.position !== undefined ||
+      obj.insertMode !== undefined ||
+      (typeof obj.html === "string" && /duplicate|copy|clone|add|insert/i.test(String(obj.type ?? "")))
+    ) {
+      type = "insertElement";
+    } else if (
+      obj.properties !== undefined ||
+      obj.cssProperties !== undefined ||
+      (obj.type === "style" && typeof obj.value === "object" && obj.value !== null)
+    ) {
+      type = "inlineStyle";
     } else if (obj.name !== undefined && obj.value !== undefined) {
       type = "attribute";
     } else if (obj.mode !== undefined || obj.className !== undefined) {
@@ -122,6 +157,38 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
     }
     if (!obj.value && typeof obj.classes === "string") {
       obj.value = obj.classes;
+    }
+  }
+
+  if (type === "inlineStyle") {
+    if (!obj.value && typeof obj.properties === "object" && obj.properties !== null) {
+      obj.value = obj.properties;
+    }
+    if (!obj.value && typeof obj.cssProperties === "object" && obj.cssProperties !== null) {
+      obj.value = obj.cssProperties;
+    }
+    if (typeof obj.value === "string") {
+      const styleMap: Record<string, string> = {};
+      for (const decl of obj.value.split(";")) {
+        const colon = decl.indexOf(":");
+        if (colon === -1) continue;
+        const prop = decl.slice(0, colon).trim();
+        const val = decl.slice(colon + 1).trim();
+        if (prop) styleMap[prop] = val;
+      }
+      obj.value = styleMap;
+    }
+  }
+
+  if (type === "insertElement") {
+    if (!obj.mode && typeof obj.insertMode === "string") {
+      obj.mode = obj.insertMode;
+    }
+    if (!obj.textContent && typeof obj.label === "string") {
+      obj.textContent = obj.label;
+    }
+    if (!obj.textContent && typeof obj.newLabel === "string") {
+      obj.textContent = obj.newLabel;
     }
   }
 
@@ -154,12 +221,24 @@ export const DomPatchSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("className"),
     value: z.string(),
-    mode: z.enum(["replace", "merge"]).default("replace"),
+    mode: z.enum(["replace", "merge"]).default("merge"),
+  }),
+  z.object({
+    type: z.literal("inlineStyle"),
+    value: z.record(z.string()),
+    mode: z.enum(["replace", "merge"]).default("merge"),
   }),
   z.object({
     type: z.literal("attribute"),
     name: z.string(),
     value: z.string(),
+  }),
+  z.object({
+    type: z.literal("insertElement"),
+    position: z.enum(["before", "after", "inside"]).default("after"),
+    mode: z.enum(["clone", "html"]).default("clone"),
+    html: z.string().optional(),
+    textContent: z.string().optional(),
   }),
   z.object({
     type: z.literal("swapElement"),

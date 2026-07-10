@@ -11,6 +11,7 @@ import {
   getBoundingBox,
   getElementSnapshot,
   getReactFiberHint,
+  insertElementRelativeTo,
   resolveElement,
   revertPatch,
 } from "../lib/dom-utils";
@@ -118,6 +119,44 @@ const applyPatch = (
   const element = resolveElement(targetSelector);
   if (!element) return null;
 
+  if (patch.type === "insertElement") {
+    const before = getElementSnapshot(element);
+    const inserted = insertElementRelativeTo(element, patch);
+    if (!inserted) return null;
+
+    const insertedSelector = generateSelector(inserted);
+    const after = getElementSnapshot(inserted);
+
+    const record: ChangeRecord = {
+      id: crypto.randomUUID(),
+      timestamp: Date.now(),
+      intent,
+      target: {
+        selector: insertedSelector,
+        xpath: generateXPath(inserted),
+        reactFiberHint: getReactFiberHint(inserted),
+        boundingBox: getBoundingBox(inserted),
+      },
+      before,
+      after,
+      patch,
+      confidence: "high",
+    };
+
+    ChangeRecordSchema.parse(record);
+    if (!ledger.some((entry) => entry.id === record.id)) {
+      ledger.push(record);
+    }
+    lastSelectedSelector = insertedSelector;
+
+    safeRuntimeSend({
+      type: "LEDGER_UPDATE",
+      ledger: [...ledger],
+    });
+
+    return record;
+  }
+
   const before = getElementSnapshot(element);
   applyPatchToElement(element, patch);
 
@@ -141,7 +180,9 @@ const applyPatch = (
   };
 
   ChangeRecordSchema.parse(record);
-  ledger.push(record);
+  if (!ledger.some((entry) => entry.id === record.id)) {
+    ledger.push(record);
+  }
   lastSelectedSelector = targetSelector;
 
   safeRuntimeSend({

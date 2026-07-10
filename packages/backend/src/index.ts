@@ -14,6 +14,7 @@ import {
   createSession,
   getJob,
   getSession,
+  removeLedgerRecord,
 } from "./store/session-store.js";
 import { attachMetadata, startSubmitJobAsync } from "./services/submit-job.js";
 import { getRegistry } from "./services/registry.js";
@@ -51,6 +52,13 @@ app.post("/sessions/:id/ledger", async (request, reply) => {
     return reply.status(400).send({ error: parsed.error.message });
   }
   const session = appendLedgerRecord(id, parsed.data);
+  if (!session) return reply.status(404).send({ error: "Session not found" });
+  return session;
+});
+
+app.delete("/sessions/:id/ledger/:changeId", async (request, reply) => {
+  const { id, changeId } = request.params as { id: string; changeId: string };
+  const session = removeLedgerRecord(id, changeId);
   if (!session) return reply.status(404).send({ error: "Session not found" });
   return session;
 });

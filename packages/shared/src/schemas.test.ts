@@ -9,12 +9,31 @@ describe("normalizeDomPatch", () => {
     });
   });
 
-  it("maps style alias to className", () => {
+  it("maps style alias with string value to className", () => {
     expect(
       normalizeDomPatch({ type: "style", value: "text-blue-500" }),
     ).toEqual({
       type: "className",
       value: "text-blue-500",
+    });
+  });
+
+  it("maps style alias with object value to inlineStyle", () => {
+    expect(
+      normalizeDomPatch({ type: "style", value: { color: "#ff0000" } }),
+    ).toEqual({
+      type: "inlineStyle",
+      value: { color: "#ff0000" },
+    });
+  });
+
+  it("maps duplicate alias to insertElement", () => {
+    expect(
+      normalizeDomPatch({ type: "duplicate", position: "after", mode: "clone" }),
+    ).toEqual({
+      type: "insertElement",
+      position: "after",
+      mode: "clone",
     });
   });
 

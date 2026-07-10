@@ -74,15 +74,21 @@ const executeSubmitJob = async (
   updateJob(job);
 
   updateStep(job, "Update Google Doc", "running");
-  const docResult = await createOrUpdateGoogleDoc({
-    metadata: session.metadata,
-    ledger: session.ledger,
-    ferrumPrUrl: codegenResult.ferrumPrUrl,
-    graphqlPrUrl: codegenResult.graphqlPrUrl,
-    figmaUrl: session.metadata.figmaUrl,
-  });
-  job.googleDocUrl = docResult.docUrl;
-  updateStep(job, "Update Google Doc", "completed", undefined, docResult.docUrl);
+  // const docResult = await createOrUpdateGoogleDoc({
+  //   metadata: session.metadata,
+  //   ledger: session.ledger,
+  //   ferrumPrUrl: codegenResult.ferrumPrUrl,
+  //   graphqlPrUrl: codegenResult.graphqlPrUrl,
+  //   figmaUrl: session.metadata.figmaUrl,
+  // });
+  // job.googleDocUrl = docResult.docUrl;
+  updateStep(
+    job,
+    "Update Google Doc",
+    "completed",
+    undefined,
+    // docResult.docUrl,
+  );
   updateJob(job);
 
   updateStep(job, "Create/update JIRA ticket", "running");
@@ -90,7 +96,7 @@ const executeSubmitJob = async (
     session,
     metadata: session.metadata,
     ferrumPrUrl: codegenResult.ferrumPrUrl,
-    googleDocUrl: docResult.docUrl,
+    // googleDocUrl: docResult.docUrl,
     graphqlPrUrl: codegenResult.graphqlPrUrl,
   });
   job.jiraTicketUrl = jiraResult.ticketUrl;
@@ -104,16 +110,16 @@ const executeSubmitJob = async (
   updateJob(job);
 
   updateStep(job, "Build Figma change manifest", "running");
-  const manifest = buildFigmaChangeManifest({
-    ledger: session.ledger,
-    figmaUrl: session.metadata.figmaUrl,
-    session,
-  });
+  // const manifest = buildFigmaChangeManifest({
+  //   ledger: session.ledger,
+  //   figmaUrl: session.metadata.figmaUrl,
+  //   session,
+  // });
   updateStep(
     job,
     "Build Figma change manifest",
     "completed",
-    `${manifest.length} bytes`,
+    // `${manifest.length} bytes`,
   );
 
   job.status = "completed";

@@ -141,7 +141,9 @@ export const apiFetch = async (
 ): Promise<Response> => {
   const token = await getAuthToken();
   const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
+  if (options.body != null) {
+    headers.set("Content-Type", "application/json");
+  }
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
