@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "build": "yarn workspace @directdom/shared build && yarn workspace @directdom/codegen build && yarn workspace @directdom/backend build && yarn workspace @directdom/extension build",
-    "dev:backend": "yarn workspace @directdom/backend dev",
+    "dev:backend": "yarn workspace @directdom/shared build && yarn workspace @directdom/backend dev",
     "dev:extension": "yarn workspace @directdom/extension dev",
     "typecheck": "yarn workspaces run typecheck",
     "test": "vitest run",

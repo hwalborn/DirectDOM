@@ -3,10 +3,17 @@ import type {
   DomPatch,
   ElementSnapshot,
 } from "@directdom/shared";
-import { parseDomPatch } from "@directdom/shared";
+import {
+  filterRelevantDibsCssClasses,
+  parseDomPatch,
+} from "@directdom/shared";
 import { completeJson } from "@directdom/shared/llm";
 import { getLlmConfig, useMockLlm } from "../config.js";
-import { getRegistry } from "./registry.js";
+import {
+  formatDibsCssClassForPrompt,
+  getDibsCssClassKeys,
+  getRegistry,
+} from "./registry.js";
 
 const extractQuotedValue = (message: string): string | null => {
   const patterns = [
@@ -44,11 +51,19 @@ export const parsePatchFromMessage = (message: string): DomPatch | null => {
     /(?:change|set).*?color.*?(?:to|as)\s+([#\w-]+)/i,
   );
   if (colorMatch) {
+    const colorToken = colorMatch[1].replace(/-/g, "");
+    const textClass = `text${colorToken.charAt(0).toUpperCase()}${colorToken.slice(1)}`;
+    const classKeys = getDibsCssClassKeys();
+    const matchedClass =
+      classKeys.find((key) => key.toLowerCase() === textClass.toLowerCase()) ??
+      classKeys.find((key) =>
+        key.toLowerCase().startsWith(`text${colorToken.toLowerCase()}`),
+      ) ??
+      "textBlue600";
+
     return {
       type: "className",
-      value: colorMatch[1].startsWith("#")
-        ? `text-[${colorMatch[1]}]`
-        : colorMatch[1],
+      value: formatDibsCssClassForPrompt(matchedClass),
       mode: "merge",
     };
   }
@@ -63,22 +78,40 @@ const parseLlmJson = (content: string): unknown => {
   return JSON.parse(jsonText);
 };
 
-const buildSystemPrompt = (): string => {
+const buildSystemPrompt = (params: {
+  message: string;
+  elementSnapshot?: ElementSnapshot;
+}): string => {
   const registry = getRegistry();
-  return `You are DirectDOM, an assistant that generates structured DOM patches for a React/Tailwind app.
+  const classKeys = getDibsCssClassKeys();
+  const relevantClasses = filterRelevantDibsCssClasses({
+    classes: classKeys,
+    message: params.message,
+    currentClassNames: params.elementSnapshot?.className,
+  }).map(formatDibsCssClassForPrompt);
+
+  const classHint =
+    relevantClasses.length > 0
+      ? relevantClasses.join(", ")
+      : "dc-textBlue600, dc-bgBlue50, dc-flex, dc-p4";
+
+  return `You are DirectDOM, an assistant that generates structured DOM patches for a React app using dibs-css.
 Return JSON only: { "reply": string, "patch": DomPatch | null }
 
+Ferrum uses dibs-css (packages/dibs-css/exports/dibs-css.module.d.css.ts). In the live DOM, classes appear as dc-<camelCaseKey>.
+Example: dibs-css key textBlue600 -> DOM class "dc-textBlue600".
+
 The patch.type field MUST be exactly one of: textContent, className, attribute, swapElement
-Do NOT use aliases like "text", "style", "class", or "html".
+For className patches, use dc-prefixed dibs-css DOM class names only (not raw Tailwind like text-blue-500).
 
 Examples:
 { "reply": "Updated the button label.", "patch": { "type": "textContent", "value": "Submit order" } }
-{ "reply": "Applied blue text.", "patch": { "type": "className", "value": "text-blue-500", "mode": "replace" } }
+{ "reply": "Applied blue text.", "patch": { "type": "className", "value": "dc-textBlue600", "mode": "merge" } }
 { "reply": "Updated the link.", "patch": { "type": "attribute", "name": "href", "value": "https://example.com" } }
 { "reply": "Swapped to the design-system button.", "patch": { "type": "swapElement", "componentName": "Button", "props": { "variant": "primary" } } }
 { "reply": "Select an element first.", "patch": null }
 
-Only use Tailwind classes from this allowlist: ${registry.tailwindAllowlist?.slice(0, 50).join(", ") ?? "standard utilities"}
+Relevant dibs-css classes for this request: ${classHint}
 For swapElement, use component names: ${registry.components.map((c) => c.name).join(", ")}`;
 };
 
@@ -121,7 +154,7 @@ export const generatePatch = async (params: {
   const llmConfig = getLlmConfig();
 
   const content = await completeJson(llmConfig, {
-    system: buildSystemPrompt(),
+    system: buildSystemPrompt({ message, elementSnapshot }),
     user: JSON.stringify({
       message,
       selectedSelector,

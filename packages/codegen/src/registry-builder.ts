@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ComponentRegistry, ComponentRegistryEntry } from "@directdom/shared";
-import { STORYBOOK_BASE_URL } from "@directdom/shared";
+import { parseDibsCssClasses, STORYBOOK_BASE_URL } from "@directdom/shared";
 
 export const parseStoriesFromRepo = (repoPath: string): ComponentRegistryEntry[] => {
   const components: ComponentRegistryEntry[] = [];
@@ -80,4 +80,13 @@ export const parseTailwindAllowlist = (configPath: string): string[] => {
     // fall through
   }
   return [];
+};
+
+export const parseDibsCssClassesFromRepo = (repoPath: string): string[] => {
+  const dtsPath = join(
+    repoPath,
+    "packages/dibs-css/exports/dibs-css.module.d.css.ts",
+  );
+  const content = readFileSync(dtsPath, "utf-8");
+  return parseDibsCssClasses(content);
 };

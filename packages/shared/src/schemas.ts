@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeDibsCssClassNames } from "./dibs-css.js";
 
 export const ConfidenceSchema = z.enum(["high", "medium", "low"]);
 export type Confidence = z.infer<typeof ConfidenceSchema>;
@@ -173,9 +174,20 @@ export const parseDomPatch = (
   raw: unknown,
 ): { success: true; data: DomPatch } | { success: false; error: z.ZodError } => {
   const result = DomPatchSchema.safeParse(normalizeDomPatch(raw));
-  if (result.success) {
+  if (!result.success) {
     return result;
   }
+
+  if (result.data.type === "className") {
+    return {
+      success: true,
+      data: {
+        ...result.data,
+        value: normalizeDibsCssClassNames(result.data.value),
+      },
+    };
+  }
+
   return result;
 };
 
@@ -309,6 +321,9 @@ export type ComponentRegistryEntry = z.infer<
 export const ComponentRegistrySchema = z.object({
   version: z.string(),
   components: z.array(ComponentRegistryEntrySchema),
+  /** camelCase keys from dibs-css.module.d.css.ts; DOM uses dc-<key> */
+  dibsCssClasses: z.array(z.string()).optional(),
+  /** @deprecated use dibsCssClasses */
   tailwindAllowlist: z.array(z.string()).optional(),
 });
 export type ComponentRegistry = z.infer<typeof ComponentRegistrySchema>;

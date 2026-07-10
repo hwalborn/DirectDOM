@@ -391,4 +391,5 @@ export {
   parseStoriesFromRepo,
   mergeRegistry,
   parseTailwindAllowlist,
+  parseDibsCssClassesFromRepo,
 } from "./registry-builder.js";

@@ -1,4 +1,5 @@
 import type { ElementSnapshot, BoundingBox } from "@directdom/shared";
+import { normalizeDibsCssClassNames } from "@directdom/shared";
 
 const STYLE_KEYS = [
   "color",
@@ -154,15 +155,19 @@ export const applyPatchToElement = (
     case "textContent":
       element.textContent = patch.value;
       break;
-    case "className":
+    case "className": {
+      const normalizedValue = normalizeDibsCssClassNames(patch.value);
       if (patch.mode === "merge") {
-        const existing = new Set(element.className.split(/\s+/).filter(Boolean));
-        patch.value.split(/\s+/).forEach((c) => existing.add(c));
+        const existing = new Set(
+          element.className.split(/\s+/).filter(Boolean),
+        );
+        normalizedValue.split(/\s+/).forEach((c) => existing.add(c));
         element.className = Array.from(existing).join(" ");
       } else {
-        element.className = patch.value;
+        element.className = normalizedValue;
       }
       break;
+    }
     case "attribute":
       element.setAttribute(patch.name, patch.value);
       break;

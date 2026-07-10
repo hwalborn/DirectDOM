@@ -23,5 +23,6 @@ describe("parsePatchFromMessage", () => {
   it("parses color changes", () => {
     const patch = parsePatchFromMessage("change the color to blue-500");
     expect(patch?.type).toBe("className");
+    expect(patch?.value).toBe("dc-textBlue600");
   });
 });
