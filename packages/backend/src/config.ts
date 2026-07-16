@@ -1,13 +1,24 @@
 import "./load-env.js";
+import { join, resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   hasLlmApiKey,
   resolveLlmConfig,
   type LlmConfig,
 } from "@directdom/shared/llm";
 
+const monorepoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
+
+const defaultFerrumRoot = resolve(monorepoRoot, "../ferrum");
+
 export const config = {
   port: Number(process.env.PORT ?? 3001),
   jwtSecret: process.env.JWT_SECRET ?? "dev-secret",
+  /** Ferrum checkout used to spawn mcp-dibs-css (stdio). */
+  ferrumRoot: resolve(process.env.FERRUM_ROOT ?? defaultFerrumRoot),
   llm: {
     provider: process.env.LLM_PROVIDER ?? "openai",
     model: process.env.LLM_MODEL ?? "",
@@ -30,9 +41,11 @@ export const config = {
   github: {
     token: process.env.GITHUB_TOKEN ?? "",
     org: process.env.GITHUB_ORG ?? "",
+    createPr: process.env.GITHUB_CREATE_PR !== "false",
   },
   redisUrl: process.env.REDIS_URL ?? "",
-  reposDir: process.env.REPOS_DIR ?? "./repos",
+  reposDir:
+    process.env.REPOS_DIR ?? join(monorepoRoot, "packages/backend/repos"),
 };
 
 export const getLlmConfig = (): LlmConfig =>

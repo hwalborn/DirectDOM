@@ -1,8 +1,4 @@
-import type {
-  ChangeRecord,
-  DomPatch,
-  ElementSnapshot,
-} from "@directdom/shared";
+import type { ChangeRecord, DomPatch } from "@directdom/shared";
 import { ChangeRecordSchema } from "@directdom/shared";
 import {
   applyPatchToElement,

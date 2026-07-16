@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [crx({ manifest })],
   define: {
     __API_URL__: JSON.stringify(
+      // Points to BE server url
       process.env.VITE_API_URL ?? "http://localhost:3001",
     ),
   },

@@ -67,7 +67,4 @@ export const matchHostname = (
 export const isProdEnvironment = (environment: Environment): boolean =>
   environment === "prod";
 
-export const STORYBOOK_BASE_URL =
-  "https://adminv2.1stdibs.com/internal/style-guide";
-
 export { ALLOWLIST_PATTERNS };

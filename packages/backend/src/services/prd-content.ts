@@ -103,7 +103,7 @@ export const DIRECTDOM_PRD_REPLACEMENTS: PrdTextReplacement[] = [
       "• Integrations: Google Docs (template copy + append), JIRA REST, GitHub via codegen.\n\n" +
       "Codegen (packages/codegen):\n" +
       "• Clone ferrum + dibs-graphql at develop; GraphQL impact: none | query-only | schema-change.\n" +
-      "• ts-morph for textContent edits; LLM fallback for complex swaps.\n" +
+      "• Deterministic dibs-css edits; source-aware LLM edits preserve translated and interpolated copy.\n" +
       "• Draft PRs: directdom/{session-id}-{slug} → develop.\n\n" +
       "No new buyer/seller policies. Internal tool only; no customer-facing rollout.",
   },

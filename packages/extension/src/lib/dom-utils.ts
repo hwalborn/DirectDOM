@@ -1,4 +1,4 @@
-import type { ElementSnapshot, BoundingBox } from "@directdom/shared";
+import type { ElementSnapshot, BoundingBox, DomPatch } from "@directdom/shared";
 import {
   normalizeDibsCssClassNames,
   resolveClassNameConflicts,
@@ -13,10 +13,14 @@ const STYLE_KEYS = [
   "margin",
 ] as const;
 
+const TEST_ID_ATTRIBUTES = ["data-tn", "data-testid"] as const;
+
 const toKebabCase = (prop: string): string =>
   prop.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`);
 
-const parseInlineStyleAttr = (style: string | undefined): Map<string, string> => {
+const parseInlineStyleAttr = (
+  style: string | undefined,
+): Map<string, string> => {
   const map = new Map<string, string>();
   if (!style) return map;
 
@@ -81,7 +85,7 @@ export const getBoundingBox = (element: Element): BoundingBox => {
   };
 };
 
-export const getComputedStyleSubset = (
+const getComputedStyleSubset = (
   element: Element,
 ): ElementSnapshot["computedStyles"] => {
   const computed = window.getComputedStyle(element);
@@ -126,42 +130,76 @@ export const getElementSnapshot = (element: Element): ElementSnapshot => {
   };
 };
 
-/** Lightweight "what React component is this?" hint for selected/changed elements,
- *  used to enrich metadata for downstream tooling like codegen or Figma mapping. */
+/** Names that are React internals or host wrappers — not useful for source lookup. */
+const isIgnoredFiberName = (name: string): boolean => {
+  if (
+    name === "Fragment" ||
+    name === "Suspense" ||
+    name === "StrictMode" ||
+    name === "Profiler" ||
+    name === "SuspenseList"
+  ) {
+    return true;
+  }
+  // Host components: div, span, button, …
+  if (/^[a-z]/.test(name)) return true;
+  if (/^(ForwardRef|Memo|Anonymous)\b/.test(name)) return true;
+  return false;
+};
+
+const readFiberTypeName = (fiber: {
+  type?: { displayName?: string; name?: string } | string;
+  elementType?: { displayName?: string; name?: string } | string;
+}): string | undefined => {
+  const fromType = (type: typeof fiber.type): string | undefined => {
+    if (!type) return undefined;
+    if (typeof type === "string") return type;
+    return type.displayName ?? type.name;
+  };
+  return fromType(fiber.type) ?? fromType(fiber.elementType);
+};
+
+/**
+ * Innermost useful React composite component name for codegen lookup.
+ * Returns a pipe-separated chain (nearest first), e.g. "ProductTitle|ProductDetails".
+ */
 export const getReactFiberHint = (element: Element): string | undefined => {
-  const key = Object.keys(element).find((k) =>
-    k.startsWith("__reactFiber$"),
-  );
+  const key = Object.keys(element).find((k) => k.startsWith("__reactFiber$"));
   if (!key) return undefined;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let fiber = (element as any)[key];
-    while (fiber) {
-      const name =
-        fiber.type?.displayName ??
-        fiber.type?.name ??
-        fiber.elementType?.displayName ??
-        fiber.elementType?.name;
-      if (name && name !== "Fragment") {
-        return name;
+    const names: string[] = [];
+
+    while (fiber && names.length < 6) {
+      const name = readFiberTypeName(fiber);
+      if (name && !isIgnoredFiberName(name) && !names.includes(name)) {
+        names.push(name);
       }
       fiber = fiber.return;
     }
+
+    return names.length > 0 ? names.join("|") : undefined;
   } catch {
     return undefined;
   }
-  return undefined;
 };
 
 export const generateSelector = (element: Element): string => {
-  const testId = element.getAttribute("data-testid");
-  if (testId) {
-    return `[data-testid="${CSS.escape(testId)}"]`;
+  for (const attributeName of TEST_ID_ATTRIBUTES) {
+    const testId = element.getAttribute(attributeName);
+    if (testId) {
+      return `[${attributeName}="${CSS.escape(testId)}"]`;
+    }
   }
 
   const id = element.id;
-  if (id && !id.match(/^\d/) && document.querySelectorAll(`#${CSS.escape(id)}`).length === 1) {
+  if (
+    id &&
+    !id.match(/^\d/) &&
+    document.querySelectorAll(`#${CSS.escape(id)}`).length === 1
+  ) {
     return `#${CSS.escape(id)}`;
   }
 
@@ -179,7 +217,10 @@ export const generateSelector = (element: Element): string => {
 
   while (current && current !== document.body) {
     let part = current.tagName.toLowerCase();
-    if (current.id && document.querySelectorAll(`#${CSS.escape(current.id)}`).length === 1) {
+    if (
+      current.id &&
+      document.querySelectorAll(`#${CSS.escape(current.id)}`).length === 1
+    ) {
       parts.unshift(`#${CSS.escape(current.id)}`);
       break;
     }
@@ -267,12 +308,23 @@ const applyLabelToElement = (element: Element, newLabel: string): void => {
 const prepareCloneForInsert = (clone: Element): Element => {
   clone.removeAttribute("id");
   clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
-  clone.querySelectorAll("[data-testid]").forEach((el) => {
-    const testId = el.getAttribute("data-testid");
-    if (testId) {
-      el.setAttribute("data-testid", `${testId}-directdom-copy`);
-    }
-  });
+
+  for (const attributeName of TEST_ID_ATTRIBUTES) {
+    const identifiedElements = [
+      ...(clone.hasAttribute(attributeName) ? [clone] : []),
+      ...clone.querySelectorAll(`[${attributeName}]`),
+    ];
+    identifiedElements.forEach((element) => {
+      const testId = element.getAttribute(attributeName);
+      if (testId) {
+        element.setAttribute(
+          attributeName,
+          `${testId}-directdom-copy`,
+        );
+      }
+    });
+  }
+
   return clone;
 };
 
@@ -284,7 +336,7 @@ const parseHtmlToElement = (html: string): Element | null => {
 
 export const insertElementRelativeTo = (
   reference: Element,
-  patch: Extract<import("@directdom/shared").DomPatch, { type: "insertElement" }>,
+  patch: Extract<DomPatch, { type: "insertElement" }>,
 ): Element | null => {
   let newElement: Element | null = null;
 
@@ -317,7 +369,7 @@ export const insertElementRelativeTo = (
 
 export const applyPatchToElement = (
   element: Element,
-  patch: import("@directdom/shared").DomPatch,
+  patch: DomPatch,
 ): void => {
   switch (patch.type) {
     case "textContent":
