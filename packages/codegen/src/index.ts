@@ -18,6 +18,8 @@ import {
   DEFAULT_BASE_BRANCH,
   FERRUM_REPO,
   GRAPHQL_REPO,
+  buildChangeTitle,
+  withJiraTicketPrefix,
 } from "@directdom/shared";
 import { Octokit } from "octokit";
 import type { LlmConfig } from "@directdom/shared/llm";
@@ -44,6 +46,8 @@ export type CodegenOptions = {
   createGithubPr?: boolean;
   reposDir?: string;
   llmConfig?: LlmConfig;
+  /** When set, prefixed onto commit message + PR title for Jira linking */
+  jiraTicketKey?: string;
 };
 
 const DEFAULT_REPOS_DIR = "./repos";
@@ -303,14 +307,23 @@ export const runCodegen = async (
     graphqlImpact,
     isProd,
     reposDir = DEFAULT_REPOS_DIR,
+    jiraTicketKey,
   } = options;
 
+  const changeTitle = buildChangeTitle({
+    pageUrl: session.pageUrl,
+    intents: session.ledger.map((r) => r.intent),
+    summary: metadata.summary,
+  });
+  const prTitle = withJiraTicketPrefix(changeTitle, jiraTicketKey);
+
   const octokit = getOctokit(options.githubToken);
-  const branchSlug = (metadata.summary ?? "change")
+  const branchSlug = changeTitle
     .toLowerCase()
+    .replace(/^\[[^\]]+\]\s*/, "")
     .replace(/[^a-z0-9]+/g, "-")
     .slice(0, 40);
-  const branchName = `directdom/${session.id.slice(0, 8)}-${branchSlug}`;
+  const branchName = `directdom/${session.id.slice(0, 8)}-${branchSlug || "change"}`;
   const labels = [
     "directdom",
     "needs-review",
@@ -424,9 +437,7 @@ export const runCodegen = async (
   const ferrumPrUrl = await createPullRequest({
     repo: FERRUM_REPO,
     branchName,
-    title:
-      metadata.summary ??
-      `DirectDOM: ${session.ledger[0]?.intent ?? "UI change"}`,
+    title: prTitle,
     body: prBody,
     files: ferrumFiles,
     basePath: ferrumPath,
@@ -466,7 +477,10 @@ export const runCodegen = async (
       graphqlPrUrl = await createPullRequest({
         repo: GRAPHQL_REPO,
         branchName: `${branchName}-graphql`,
-        title: `[GraphQL] ${metadata.summary ?? "DirectDOM change"}`,
+        title: withJiraTicketPrefix(
+          `[GraphQL] ${changeTitle}`,
+          jiraTicketKey,
+        ),
         body: `${prBody}\n\nLinked Ferrum change: ${ferrumPrUrl}`,
         files: graphqlFiles,
         basePath: graphqlPath,

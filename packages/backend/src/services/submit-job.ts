@@ -9,7 +9,7 @@ import {
 } from "../store/session-store.js";
 import { createOrUpdateGoogleDoc } from "./google-docs.js";
 import { buildFigmaChangeManifest } from "./figma-manifest.js";
-import { createOrUpdateJiraTicket } from "./jira.js";
+import { commentJiraTicket, ensureJiraTicket } from "./jira.js";
 import { analyzeGraphqlImpact } from "./llm.js";
 import { config, getLlmConfig } from "../config.js";
 
@@ -51,6 +51,23 @@ const executeSubmitJob = async (
   updateStep(job, "Analyze GraphQL impact", "completed", graphqlImpact);
   updateJob(job);
 
+  // Create/resolve Jira first so commit + PR titles can include the ticket
+  // key (e.g. "SELLA-123 …") and auto-link in Jira's development panel.
+  updateStep(job, "Create/update JIRA ticket", "running");
+  const jiraResult = await ensureJiraTicket({
+    session,
+    metadata: session.metadata,
+  });
+  job.jiraTicketUrl = jiraResult.ticketUrl;
+  updateStep(
+    job,
+    "Create/update JIRA ticket",
+    "completed",
+    jiraResult.ticketKey,
+    jiraResult.ticketUrl,
+  );
+  updateJob(job);
+
   updateStep(job, "Generate code & create PRs", "running");
   const codegenResult = await runCodegen({
     session,
@@ -61,6 +78,7 @@ const executeSubmitJob = async (
     createGithubPr: config.github.createPr,
     llmConfig: getLlmConfig(),
     reposDir: config.reposDir,
+    jiraTicketKey: jiraResult.ticketKey,
   });
 
   job.ferrumPrUrl = codegenResult.ferrumPrUrl;
@@ -78,6 +96,7 @@ const executeSubmitJob = async (
   // const docResult = await createOrUpdateGoogleDoc({
   //   metadata: session.metadata,
   //   ledger: session.ledger,
+  //   jiraTicketUrl: jiraResult.ticketUrl,
   //   ferrumPrUrl: codegenResult.ferrumPrUrl,
   //   graphqlPrUrl: codegenResult.graphqlPrUrl,
   //   figmaUrl: session.metadata.figmaUrl,
@@ -92,18 +111,17 @@ const executeSubmitJob = async (
   );
   updateJob(job);
 
-  updateStep(job, "Create/update JIRA ticket", "running");
-  const jiraResult = await createOrUpdateJiraTicket({
+  updateStep(job, "Link PRs on JIRA ticket", "running");
+  await commentJiraTicket({
+    ticketKey: jiraResult.ticketKey,
     session,
-    metadata: session.metadata,
     ferrumPrUrl: codegenResult.ferrumPrUrl,
     // googleDocUrl: docResult.docUrl,
     graphqlPrUrl: codegenResult.graphqlPrUrl,
   });
-  job.jiraTicketUrl = jiraResult.ticketUrl;
   updateStep(
     job,
-    "Create/update JIRA ticket",
+    "Link PRs on JIRA ticket",
     "completed",
     jiraResult.ticketKey,
     jiraResult.ticketUrl,

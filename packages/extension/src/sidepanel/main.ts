@@ -6,7 +6,7 @@ import type {
   SessionMetadata,
   SubmitJob,
 } from "@directdom/shared";
-import { isProdEnvironment } from "@directdom/shared";
+import { buildChangeTitle, isProdEnvironment } from "@directdom/shared";
 import {
   apiFetch,
   sendToActiveTab,
@@ -131,7 +131,7 @@ const handlePick = async (): Promise<void> => {
  * It sends the message to the backend and updates the ledger.
  */
 const handleSend = async (): Promise<void> => {
-  const input = $<HTMLInputElement>("chat-input");
+  const input = $<HTMLTextAreaElement>("chat-input");
   const message = input.value.trim();
   if (!message || !session) return;
 
@@ -209,10 +209,10 @@ const handleSend = async (): Promise<void> => {
 const handleContinue = (): void => {
   if (ledger.length === 0) return;
 
-  const summary = ledger
-    .map((r) => r.intent)
-    .join("; ")
-    .slice(0, 200);
+  const summary = buildChangeTitle({
+    pageUrl: session?.pageUrl,
+    intents: ledger.map((r) => r.intent),
+  });
   $<HTMLInputElement>("summary").value = summary;
   showView("continue-view");
 };
@@ -366,7 +366,10 @@ document.addEventListener("DOMContentLoaded", () => {
   $("pick-btn").addEventListener("click", handlePick);
   $("send-btn").addEventListener("click", handleSend);
   $("chat-input").addEventListener("keydown", (e) => {
-    if (e.key === "Enter") handleSend();
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
   });
   $("continue-btn").addEventListener("click", handleContinue);
   $("back-btn").addEventListener("click", handleBack);
