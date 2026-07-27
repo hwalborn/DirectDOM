@@ -27,6 +27,16 @@ describe("parsePageUrlContext", () => {
       expect.arrayContaining(["furniture", "tables"]),
     );
   });
+
+  it("detects dealer host family on public hosts under /dealers", () => {
+    const ctx = parsePageUrlContext(
+      "https://qa.1stdibs.com/dealers/dashboard",
+    );
+    expect(ctx?.hostFamily).toBe("dealer");
+    expect(ctx?.pathSegments).toEqual(
+      expect.arrayContaining(["dealers", "dashboard"]),
+    );
+  });
 });
 
 describe("resolveFerrumAppsFromPageUrl", () => {
@@ -37,5 +47,15 @@ describe("resolveFerrumAppsFromPageUrl", () => {
     );
     expect(matches[0]?.appName).toBe("app-admin-inventory");
     expect(matches[0]?.route).toBe("/internal/inventory-management");
+  });
+
+  it("matches app-dealer-tools from /dealers/dashboard on a buyer host", () => {
+    const { matches, context } = resolveFerrumAppsFromPageUrl(
+      FIXTURE_REPO,
+      "https://qa.1stdibs.com/dealers/dashboard",
+    );
+    expect(context?.hostFamily).toBe("dealer");
+    expect(matches[0]?.appName).toBe("app-dealer-tools");
+    expect(matches.some((m) => m.appName.startsWith("app-buyer-"))).toBe(false);
   });
 });

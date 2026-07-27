@@ -4,7 +4,10 @@ import { describe, expect, it } from "vitest";
 import type { ChangeRecord } from "@directdom/shared";
 import {
   collectSearchSignals,
+  extractNlSignals,
   findCandidateFiles,
+  matchDataTnInSource,
+  normalizeTnValue,
 } from "./find-candidates.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +66,71 @@ describe("collectSearchSignals", () => {
     ]);
 
     expect(signals.fiberHints).toEqual(["ProductTitle", "ProductDetails"]);
+  });
+
+  it("extracts NL phrases from intent", () => {
+    const signals = collectSearchSignals([
+      baseRecord({
+        intent:
+          "Change the font color of the action required in the dealer dashboard to dealer primary blue",
+        target: {
+          selector: "h2",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        before: { tagName: "H2" },
+        patch: { type: "className", value: "dc-textBlue600", mode: "merge" },
+      }),
+    ]);
+
+    expect(signals.nlPhrases).toEqual(
+      expect.arrayContaining(["action required", "dealer dashboard"]),
+    );
+    expect(signals.nlTokens).toEqual(
+      expect.arrayContaining(["action", "required", "dealer", "dashboard"]),
+    );
+  });
+});
+
+describe("extractNlSignals", () => {
+  it("prefers multi-word phrases over stopwords", () => {
+    const { phrases, tokens } = extractNlSignals(
+      'Update "Action Required" heading color',
+    );
+    expect(phrases).toEqual(expect.arrayContaining(["action required"]));
+    expect(tokens).not.toContain("update");
+    expect(tokens).not.toContain("color");
+  });
+});
+
+describe("matchDataTnInSource", () => {
+  it("matches exact literals", () => {
+    expect(
+      matchDataTnInSource('data-tn="product-title"', {
+        name: "data-tn",
+        value: "product-title",
+      }),
+    ).toBe("exact");
+  });
+
+  it("matches interpolated template suffix against DOM value", () => {
+    const source = "data-tn={`${dataTn}-submitButton`}";
+    expect(
+      matchDataTnInSource(source, {
+        name: "data-tn",
+        value: "item-upload-submit-button",
+      }),
+    ).toBe("partial");
+    expect(normalizeTnValue("submitButton")).toBe("submitbutton");
+  });
+
+  it("does not match unrelated static parts", () => {
+    const source = "data-tn={`${dataTn}-cancelLink`}";
+    expect(
+      matchDataTnInSource(source, {
+        name: "data-tn",
+        value: "item-upload-submit-button",
+      }),
+    ).toBeNull();
   });
 });
 
@@ -200,5 +268,54 @@ describe("findCandidateFiles", () => {
 
     expect(candidates.length).toBeGreaterThan(0);
     expect(candidates[0]?.path).toContain("app-admin-inventory");
+  });
+
+  it("finds ActionRequiredBanner from dealer dashboard URL + NL intent", () => {
+    const candidates = findCandidateFiles(
+      FIXTURE_REPO,
+      [
+        baseRecord({
+          intent:
+            "Change the font color of the action required in the dealer dashboard to dealer primary blue",
+          target: {
+            selector: "h2",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: { tagName: "H2", textContent: "Action Required" },
+          patch: {
+            type: "className",
+            value: "dc-textDealerPrimary",
+            mode: "merge",
+          },
+        }),
+      ],
+      {
+        pageUrl: "https://qa.1stdibs.com/dealers/dashboard",
+      },
+    );
+
+    expect(candidates[0]?.path).toContain("ActionRequiredBanner.tsx");
+    expect(candidates[0]?.path).toContain("app-dealer-tools");
+  });
+
+  it("finds SubmitButton via interpolated data-tn suffix", () => {
+    const candidates = findCandidateFiles(
+      FIXTURE_REPO,
+      [
+        baseRecord({
+          target: {
+            selector: '[data-tn="item-upload-submit-button"]',
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: { tagName: "BUTTON" },
+          patch: { type: "className", value: "dc-textBlue600", mode: "merge" },
+        }),
+      ],
+      {
+        pageUrl: "https://qa.1stdibs.com/dealers/dashboard",
+      },
+    );
+
+    expect(candidates[0]?.path).toContain("SubmitButton.tsx");
   });
 });
