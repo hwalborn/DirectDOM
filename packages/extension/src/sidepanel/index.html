@@ -32,13 +32,13 @@
             >
               ⊕
             </button>
-            <input
+            <textarea
               id="chat-input"
-              type="text"
               class="chat-input"
               placeholder="Describe a change…"
               aria-label="Chat message"
-            />
+              rows="3"
+            ></textarea>
             <button id="send-btn" type="button" class="btn btn--primary">Send</button>
           </div>
           <div id="ledger-panel" class="ledger-panel">
@@ -96,8 +96,14 @@
               <input id="figma-url" type="url" class="form__input" placeholder="https://figma.com/..." />
             </label>
             <label class="form__label">
-              Summary
-              <input id="summary" type="text" class="form__input" placeholder="Auto-filled from changes" />
+              Title (Jira / PR / commit)
+              <input
+                id="summary"
+                type="text"
+                class="form__input"
+                placeholder="Auto-filled from page + changes"
+                aria-label="Title used for Jira ticket, pull request, and commit"
+              />
             </label>
           </form>
           <div class="btn-row">

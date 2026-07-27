@@ -61,18 +61,64 @@ const LOW_SIGNAL_CLASS_TOKENS = new Set([
   "p0",
 ]);
 
+/** Common English / edit verbs that drown NL search. */
+const NL_STOPWORDS = new Set([
+  "a",
+  "an",
+  "and",
+  "as",
+  "at",
+  "be",
+  "by",
+  "change",
+  "color",
+  "colours",
+  "css",
+  "font",
+  "for",
+  "from",
+  "in",
+  "into",
+  "is",
+  "it",
+  "its",
+  "make",
+  "of",
+  "on",
+  "or",
+  "please",
+  "set",
+  "should",
+  "style",
+  "styles",
+  "text",
+  "that",
+  "the",
+  "this",
+  "to",
+  "update",
+  "use",
+  "using",
+  "with",
+]);
+
 const MAX_CANDIDATES = 8;
 const MAX_FILE_CHARS = 40_000;
 const MIN_TEXT_LEN = 3;
+const MIN_NL_TOKEN_LEN = 4;
+const MIN_DATA_TN_PART_LEN = 4;
 
 const SCORE_FIBER_FILENAME = 100;
 const SCORE_FIBER_EXPORT = 80;
 const SCORE_DATA_ATTR = 60;
+const SCORE_DATA_ATTR_PARTIAL = 45;
 const SCORE_APP_MATCH = 50;
 const SCORE_TEXT = 40;
+const SCORE_NL_PHRASE = 40;
 const SCORE_PATH_SEGMENT = 30;
 const SCORE_CLASS_TOKEN = 25;
 const SCORE_FIBER_PARTIAL = 20;
+const SCORE_NL_TOKEN = 12;
 
 type SearchSignals = {
   fiberHints: string[];
@@ -81,6 +127,10 @@ type SearchSignals = {
   classTokens: string[];
   pathSegments: string[];
   matchedApps: string[];
+  /** Multi-word phrases from user intent (preferred NL matches). */
+  nlPhrases: string[];
+  /** Significant single tokens from user intent. */
+  nlTokens: string[];
 };
 
 export type FindCandidateOptions = {
@@ -176,6 +226,147 @@ const parseFiberHints = (raw: string | undefined): string[] => {
     .filter((name) => !/^(ForwardRef|Memo|Anonymous|Fragment)\b/.test(name));
 };
 
+/** Lowercase alphanumeric only — bridges kebab ↔ camel for data-tn parts. */
+export const normalizeTnValue = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+/**
+ * Pull static string chunks from data-tn / dataTn assignments, including
+ * template literals like `data-tn={`${prefix}-submitButton`}`.
+ */
+export const extractDataTnStaticParts = (content: string): string[] => {
+  const parts: string[] = [];
+
+  const pushClean = (raw: string): void => {
+    const cleaned = raw.replace(/^[-_\s]+|[-_\s]+$/g, "");
+    if (cleaned) parts.push(cleaned);
+  };
+
+  // data-tn="literal" | dataTn='literal'
+  for (const match of content.matchAll(
+    /\bdata-?tn\s*=\s*(["'])([^"']+)\1/gi,
+  )) {
+    pushClean(match[2]);
+  }
+
+  // data-tn={"literal"} | dataTn={'literal'}
+  for (const match of content.matchAll(
+    /\bdata-?tn\s*=\s*\{\s*(["'])([^"']+)\1\s*\}/gi,
+  )) {
+    pushClean(match[2]);
+  }
+
+  // data-tn={`static${expr}static`} — template body split on ${...}
+  for (const match of content.matchAll(
+    /\bdata-?tn\s*=\s*\{\s*`([^`]*)`\s*\}/gi,
+  )) {
+    for (const chunk of match[1].split(/\$\{[^}]+\}/)) {
+      pushClean(chunk);
+    }
+  }
+
+  // data-tn={foo + '-suffix'} / dataTn={bar + "-submit"}
+  for (const match of content.matchAll(
+    /\bdata-?tn\s*=\s*\{(?:(?!`)[^}]){0,200}?(["'])([^"'\\]+)\1(?:(?!`)[^}]){0,200}?\}/gi,
+  )) {
+    pushClean(match[2]);
+  }
+
+  return [...new Set(parts)];
+};
+
+/**
+ * True when source has an exact data-tn/dataTn literal, or an interpolated
+ * assignment whose static chunks appear inside the DOM value
+ * (e.g. DOM `item-upload-submit-button` ↔ `${dataTn}-submitButton`).
+ */
+export const matchDataTnInSource = (
+  content: string,
+  attr: { name: string; value: string },
+): "exact" | "partial" | null => {
+  const { name, value } = attr;
+  const camel = name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+  if (
+    content.includes(`${name}="${value}"`) ||
+    content.includes(`${name}='${value}'`) ||
+    content.includes(`${camel}="${value}"`) ||
+    content.includes(`${camel}='${value}'`) ||
+    content.includes(`${camel}={"${value}"}`) ||
+    content.includes(`${camel}={'${value}'}`)
+  ) {
+    return "exact";
+  }
+
+  const normValue = normalizeTnValue(value);
+  if (normValue.length < MIN_DATA_TN_PART_LEN) return null;
+
+  for (const part of extractDataTnStaticParts(content)) {
+    const normPart = normalizeTnValue(part);
+    if (
+      normPart.length >= MIN_DATA_TN_PART_LEN &&
+      normValue.includes(normPart)
+    ) {
+      return "partial";
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Turn a natural-language intent into searchable phrases + tokens.
+ * Prefers multi-word phrases ("action required") over lone stopword-y tokens.
+ */
+export const extractNlSignals = (
+  intent: string,
+): { phrases: string[]; tokens: string[] } => {
+  const phrases = new Set<string>();
+  const tokens = new Set<string>();
+
+  const trimmed = intent.trim();
+  if (!trimmed) return { phrases: [], tokens: [] };
+
+  for (const quoted of trimmed.matchAll(/["']([^"']{3,80})["']/g)) {
+    phrases.add(quoted[1].trim().toLowerCase());
+  }
+
+  const words = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, " ")
+    .split(/\s+/)
+    .map((w) => w.trim())
+    .filter(Boolean);
+
+  const isSignificant = (w: string): boolean =>
+    w.length >= MIN_NL_TOKEN_LEN && !NL_STOPWORDS.has(w);
+
+  // Only adjacent significant words become phrases — don't glue across stopwords
+  // ("action required in the dealer dashboard" → "action required", "dealer dashboard").
+  for (let i = 0; i < words.length - 1; i++) {
+    if (isSignificant(words[i]) && isSignificant(words[i + 1])) {
+      phrases.add(`${words[i]} ${words[i + 1]}`);
+    }
+  }
+  for (let i = 0; i < words.length - 2; i++) {
+    if (
+      isSignificant(words[i]) &&
+      isSignificant(words[i + 1]) &&
+      isSignificant(words[i + 2])
+    ) {
+      phrases.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+    }
+  }
+
+  for (const word of words) {
+    if (isSignificant(word)) tokens.add(word);
+  }
+
+  return {
+    phrases: [...phrases].filter((p) => p.length >= MIN_NL_TOKEN_LEN),
+    tokens: [...tokens],
+  };
+};
+
 export const collectSearchSignals = (
   ledger: ChangeRecord[],
   pageContext?: PageUrlContext | null,
@@ -185,6 +376,8 @@ export const collectSearchSignals = (
   const dataAttrs: Array<{ name: string; value: string }> = [];
   const texts = new Set<string>();
   const classTokens = new Set<string>();
+  const nlPhrases = new Set<string>();
+  const nlTokens = new Set<string>();
 
   for (const change of ledger) {
     for (const hint of parseFiberHints(change.target.reactFiberHint)) {
@@ -193,6 +386,11 @@ export const collectSearchSignals = (
 
     for (const attr of extractDataAttrs(change.target.selector)) {
       dataAttrs.push(attr);
+    }
+
+    const attrTn = change.before.attributes?.["data-tn"];
+    if (attrTn && !dataAttrs.some((a) => a.value === attrTn)) {
+      dataAttrs.push({ name: "data-tn", value: attrTn });
     }
 
     for (const text of [
@@ -210,6 +408,10 @@ export const collectSearchSignals = (
     for (const token of extractClassTokens(change.after.className)) {
       classTokens.add(token);
     }
+
+    const nl = extractNlSignals(change.intent);
+    for (const phrase of nl.phrases) nlPhrases.add(phrase);
+    for (const token of nl.tokens) nlTokens.add(token);
   }
 
   return {
@@ -219,6 +421,8 @@ export const collectSearchSignals = (
     classTokens: [...classTokens],
     pathSegments: pageContext?.pathSegments ?? [],
     matchedApps,
+    nlPhrases: [...nlPhrases],
+    nlTokens: [...nlTokens],
   };
 };
 
@@ -235,20 +439,6 @@ const hasFiberExport = (content: string, hint: string): boolean => {
   return patterns.some((re) => re.test(content));
 };
 
-const hasDataAttr = (
-  content: string,
-  attr: { name: string; value: string },
-): boolean => {
-  const { name, value } = attr;
-  const camel = name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
-  return (
-    content.includes(`${name}="${value}"`) ||
-    content.includes(`${name}='${value}'`) ||
-    content.includes(`${camel}="${value}"`) ||
-    content.includes(`${camel}='${value}'`)
-  );
-};
-
 const scoreFile = (
   absPath: string,
   relPath: string,
@@ -259,6 +449,7 @@ const scoreFile = (
   let locationScore = 0;
   const stem = fileStem(absPath);
   const relLower = relPath.toLowerCase();
+  const contentLower = content.toLowerCase();
 
   for (const hint of signals.fiberHints) {
     if (stem === hint || stem.toLowerCase() === hint.toLowerCase()) {
@@ -274,14 +465,38 @@ const scoreFile = (
   }
 
   for (const attr of signals.dataAttrs) {
-    if (hasDataAttr(content, attr)) {
+    const match = matchDataTnInSource(content, attr);
+    if (match === "exact") {
       contentScore += SCORE_DATA_ATTR;
+    } else if (match === "partial") {
+      contentScore += SCORE_DATA_ATTR_PARTIAL;
     }
   }
 
   for (const text of signals.texts) {
     if (content.includes(text)) {
       contentScore += SCORE_TEXT;
+    }
+  }
+
+  for (const phrase of signals.nlPhrases) {
+    if (contentLower.includes(phrase) || relLower.includes(phrase.replace(/\s+/g, ""))) {
+      contentScore += SCORE_NL_PHRASE;
+    } else if (relLower.includes(phrase.replace(/\s+/g, "-"))) {
+      contentScore += SCORE_NL_PHRASE;
+    }
+  }
+
+  for (const token of signals.nlTokens) {
+    const inPath =
+      relLower.includes(token) || stem.toLowerCase().includes(token);
+    const inContent = contentLower.includes(token);
+    // Require a content hit, or a path hit when we also have other signals —
+    // path-only token matches are too noisy alone.
+    if (inContent || (inPath && contentScore > 0)) {
+      contentScore += SCORE_NL_TOKEN;
+    } else if (inPath) {
+      locationScore += SCORE_NL_TOKEN;
     }
   }
 
@@ -310,7 +525,10 @@ const scoreFile = (
   const pathSegmentHits = signals.pathSegments.some((segment) =>
     relLower.includes(segment.toLowerCase()),
   );
-  if (contentScore === 0 && !pathSegmentHits) {
+  const nlPathHits = signals.nlTokens.some((token) =>
+    relLower.includes(token),
+  );
+  if (contentScore === 0 && !pathSegmentHits && !nlPathHits) {
     return 0;
   }
 
@@ -328,7 +546,9 @@ const hasUsableSignals = (signals: SearchSignals): boolean =>
   signals.texts.length > 0 ||
   signals.classTokens.length > 0 ||
   signals.pathSegments.length > 0 ||
-  signals.matchedApps.length > 0;
+  signals.matchedApps.length > 0 ||
+  signals.nlPhrases.length > 0 ||
+  signals.nlTokens.length > 0;
 
 const scoreRepoFiles = (
   repoPath: string,
@@ -392,7 +612,7 @@ export const findCandidateFiles = (
 
   const signals = collectSearchSignals(ledger, context, matchedApps);
   console.log(
-    `[codegen] search signals: fiber=[${signals.fiberHints.join(", ")}] dataAttrs=${signals.dataAttrs.length} texts=${signals.texts.length} classTokens=[${signals.classTokens.slice(0, 8).join(", ")}] segments=[${signals.pathSegments.join(", ")}]`,
+    `[codegen] search signals: fiber=[${signals.fiberHints.join(", ")}] dataAttrs=${signals.dataAttrs.length} texts=${signals.texts.length} classTokens=[${signals.classTokens.slice(0, 8).join(", ")}] nlPhrases=[${signals.nlPhrases.slice(0, 6).join(", ")}] segments=[${signals.pathSegments.join(", ")}]`,
   );
 
   if (!hasUsableSignals(signals)) return [];

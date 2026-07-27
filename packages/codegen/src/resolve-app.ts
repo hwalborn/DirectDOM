@@ -4,8 +4,11 @@ import { join, relative } from "node:path";
 export type PageUrlContext = {
   hostname: string;
   pathname: string;
-  /** adminv2 hosts → admin; 1stdibs.com → buyer */
-  hostFamily: "admin" | "buyer" | "unknown";
+  /**
+   * adminv2 → admin; /dealers* on public hosts → dealer;
+   * other 1stdibs.com → buyer
+   */
+  hostFamily: "admin" | "buyer" | "dealer" | "unknown";
   /** Meaningful pathname segments for path scoring */
   pathSegments: string[];
 };
@@ -28,7 +31,6 @@ const SKIP_ROUTE_SCAN_DIRS = new Set([
 
 const GENERIC_SEGMENTS = new Set([
   "internal",
-  "dealers",
   "mobile",
   "my",
   "id",
@@ -50,20 +52,27 @@ const GENERIC_SEGMENTS = new Set([
   "it",
 ]);
 
+const isPublic1stDibsHost = (hostname: string): boolean =>
+  /^(qa|stage|local)(\.intranet)?\.1stdibs\.com$/.test(hostname) ||
+  /^(www\.)?1stdibs\.com$/.test(hostname);
+
 const parsePageUrl = (pageUrl: string): PageUrlContext | null => {
   try {
     const url = new URL(pageUrl);
     const hostname = url.hostname.toLowerCase();
     const pathname = decodeURIComponent(url.pathname || "/");
+    const isDealerPath =
+      pathname === "/dealers" || pathname.startsWith("/dealers/");
 
     let hostFamily: PageUrlContext["hostFamily"] = "unknown";
     if (hostname.includes("adminv2")) {
-      hostFamily = "admin";
-    } else if (
-      /^(qa|stage|local)(\.intranet)?\.1stdibs\.com$/.test(hostname) ||
-      /^(www\.)?1stdibs\.com$/.test(hostname)
-    ) {
-      hostFamily = "buyer";
+      // Dealer tools also mount under admin in some envs, but /dealers on
+      // public hosts is the primary dealer surface.
+      hostFamily = isDealerPath ? "dealer" : "admin";
+    } else if (isPublic1stDibsHost(hostname)) {
+      hostFamily = isDealerPath ? "dealer" : "buyer";
+    } else if (isDealerPath) {
+      hostFamily = "dealer";
     }
 
     const pathSegments = pathname
@@ -174,9 +183,10 @@ const appMatchesHostFamily = (
 ): boolean => {
   if (hostFamily === "unknown") return true;
   if (hostFamily === "admin") {
-    return (
-      appName.startsWith("app-admin-") || appName.startsWith("app-dealer-")
-    );
+    return appName.startsWith("app-admin-");
+  }
+  if (hostFamily === "dealer") {
+    return appName.startsWith("app-dealer-");
   }
   return appName.startsWith("app-buyer-");
 };

@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "yarn workspace @directdom/shared build && yarn workspace @directdom/codegen build && yarn workspace @directdom/backend build && yarn workspace @directdom/extension build",
+    "dev": "concurrently -n extension,backend -c cyan,magenta \"yarn dev:extension\" \"yarn dev:backend\"",
     "dev:backend": "yarn workspace @directdom/shared build && yarn workspace @directdom/backend dev",
     "dev:extension": "yarn workspace @directdom/extension dev",
     "typecheck": "yarn workspaces run typecheck",
@@ -20,6 +21,7 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "concurrently": "^10.0.4",
     "vitest": "^2.1.8"
   }
 }
