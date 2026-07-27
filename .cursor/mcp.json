@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "dibs-css": {
+      "command": "npx",
+      "args": ["./mcp/mcp-dibs-css"],
+      "cwd": "/Users/holtw/projects/ferrum"
+    }
+  }
+}

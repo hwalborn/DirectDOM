@@ -41,6 +41,7 @@ Load the extension from `packages/extension/dist` in Chrome (`chrome://extension
 
 ## Allowlisted hosts
 
+- `adminv2.local.intranet.1stdibs.com` / `local.intranet.1stdibs.com` (local)
 - `adminv2.{qa,stage}.intranet.1stdibs.com`
 - `adminv2.{qa,stage}.1stdibs.com`
 - `{qa,stage}.intranet.1stdibs.com`
@@ -59,6 +60,7 @@ See [`.env.example`](.env.example). Without API keys, the backend runs in **mock
 | `LLM_MODEL` | Override default model (`gpt-4o-mini` / `claude-haiku-4-5`) |
 | `ANTHROPIC_API_KEY` | Chat → patch + codegen when `LLM_PROVIDER=anthropic` |
 | `GITHUB_TOKEN` | Clone repos, create PRs |
+| `GITHUB_CREATE_PR` | Set to `false` to push branch only (compare URL, no draft PR) |
 | `JIRA_EMAIL` + `JIRA_API_TOKEN` | Create/update tickets |
 | `GOOGLE_CLIENT_ID/SECRET` | Docs API |
 

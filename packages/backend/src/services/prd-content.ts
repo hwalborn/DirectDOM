@@ -96,14 +96,14 @@ export const DIRECTDOM_PRD_REPLACEMENTS: PrdTextReplacement[] = [
       "Extension (packages/extension):\n" +
       "• Side panel chat UI with element picker (⊕), change ledger, undo, Continue/Submit.\n" +
       "• Content script applies patches: textContent, className (Tailwind allowlist), attribute, swapElement (registry-only).\n" +
-      "• Host allowlist: adminv2.{qa,stage}.1stdibs.com, {qa,stage}.1stdibs.com, intranet variants, adminv2.1stdibs.com, 1stdibs.com.\n" +
+      "• Host allowlist: adminv2.{local,qa,stage}.intranet.1stdibs.com, {local,qa,stage}.intranet.1stdibs.com, adminv2.{qa,stage}.1stdibs.com, {qa,stage}.1stdibs.com, adminv2.1stdibs.com, 1stdibs.com.\n" +
       "• Prod guardrails: confirmation dialog before Submit; draft PRs tagged prod-origin.\n\n" +
       "Backend (packages/backend):\n" +
       "• Fastify API: sessions, chat→patch LLM, ledger, Continue metadata, async Submit jobs.\n" +
       "• Integrations: Google Docs (template copy + append), JIRA REST, GitHub via codegen.\n\n" +
       "Codegen (packages/codegen):\n" +
       "• Clone ferrum + dibs-graphql at develop; GraphQL impact: none | query-only | schema-change.\n" +
-      "• ts-morph for textContent edits; LLM fallback for complex swaps.\n" +
+      "• Deterministic dibs-css edits; source-aware LLM edits preserve translated and interpolated copy.\n" +
       "• Draft PRs: directdom/{session-id}-{slug} → develop.\n\n" +
       "No new buyer/seller policies. Internal tool only; no customer-facing rollout.",
   },

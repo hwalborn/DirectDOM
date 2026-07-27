@@ -18,6 +18,7 @@ import {
 } from "./store/session-store.js";
 import { attachMetadata, startSubmitJobAsync } from "./services/submit-job.js";
 import { getRegistry } from "./services/registry.js";
+import { closeDibsCssMcp } from "./services/dibs-css-mcp.js";
 
 const app = Fastify({ logger: true });
 
@@ -161,10 +162,24 @@ const start = async (): Promise<void> => {
     console.log(
       `DirectDOM backend listening on http://localhost:${config.port}`,
     );
+    console.log(`mcp-dibs-css ferrum root: ${config.ferrumRoot}`);
   } catch (err) {
     app.log.error(err);
     process.exit(1);
   }
 };
+
+const shutdown = async (): Promise<void> => {
+  await closeDibsCssMcp();
+  await app.close();
+  process.exit(0);
+};
+
+process.on("SIGINT", () => {
+  void shutdown();
+});
+process.on("SIGTERM", () => {
+  void shutdown();
+});
 
 start();

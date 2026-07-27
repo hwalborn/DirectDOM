@@ -66,6 +66,21 @@ describe("parseDomPatch", () => {
     }
   });
 
+  it("normalizes class patches to dibs-css DOM class names", () => {
+    const result = parseDomPatch({
+      type: "className",
+      value: "textBlue600 dc-bgBlue50",
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data).toEqual({
+        type: "className",
+        value: "dc-textBlue600 dc-bgBlue50",
+        mode: "merge",
+      });
+    }
+  });
+
   it("rejects unknown patch types", () => {
     const result = parseDomPatch({ type: "foo", random: 1 });
     expect(result.success).toBe(false);

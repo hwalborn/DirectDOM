@@ -5,6 +5,14 @@ const ALLOWLIST_PATTERNS: Array<{
   environment: Environment;
 }> = [
   {
+    pattern: /^adminv2\.local\.intranet\.1stdibs\.com$/,
+    environment: "qa",
+  },
+  {
+    pattern: /^local\.intranet\.1stdibs\.com$/,
+    environment: "qa",
+  },
+  {
     pattern: /^adminv2\.qa\.intranet\.1stdibs\.com$/,
     environment: "qa",
   },
@@ -66,8 +74,5 @@ export const matchHostname = (
 
 export const isProdEnvironment = (environment: Environment): boolean =>
   environment === "prod";
-
-export const STORYBOOK_BASE_URL =
-  "https://adminv2.1stdibs.com/internal/style-guide";
 
 export { ALLOWLIST_PATTERNS };

@@ -58,6 +58,7 @@ const executeSubmitJob = async (
     graphqlImpact,
     isProd: isProdEnvironment(session.environment),
     githubToken: config.github.token,
+    createGithubPr: config.github.createPr,
     llmConfig: getLlmConfig(),
     reposDir: config.reposDir,
   });

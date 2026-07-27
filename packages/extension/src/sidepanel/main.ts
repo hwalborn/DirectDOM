@@ -24,6 +24,7 @@ let selectedSelector: string | null = null;
 let selectedSnapshot: ElementSnapshot | null = null;
 let ledger: ChangeRecord[] = [];
 
+// mock up an easy way to get elements on the sidepanel
 const $ = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
@@ -69,9 +70,18 @@ const renderLedger = (): void => {
   ($("continue-btn") as HTMLButtonElement).disabled = ledger.length === 0;
 };
 
+/**
+ * This grabs the context from the background page and begins a new session.
+ * It's called on page load or navigate or whenever we start a new session! Nifty
+ */
 const initSession = async (): Promise<void> => {
   const context = await sendToBackground<
-    ExtensionMessage & { pageUrl?: string; hostname?: string; allowed?: boolean; environment?: string }
+    ExtensionMessage & {
+      pageUrl?: string;
+      hostname?: string;
+      allowed?: boolean;
+      environment?: string;
+    }
   >({ type: "GET_TAB_CONTEXT" });
 
   if (!context.allowed || !context.pageUrl) {
@@ -96,7 +106,10 @@ const initSession = async (): Promise<void> => {
   }
 
   session = (await res.json()) as Session;
-  addMessage("assistant", "Session started. Pick an element or describe a change.");
+  addMessage(
+    "assistant",
+    "Session started. Pick an element or describe a change.",
+  );
 };
 
 const handlePick = async (): Promise<void> => {
@@ -113,6 +126,10 @@ const handlePick = async (): Promise<void> => {
   }
 };
 
+/**
+ * This is the main function that handles the chat input.
+ * It sends the message to the backend and updates the ledger.
+ */
 const handleSend = async (): Promise<void> => {
   const input = $<HTMLInputElement>("chat-input");
   const message = input.value.trim();
@@ -135,7 +152,10 @@ const handleSend = async (): Promise<void> => {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      addMessage("error", (err as { error?: string }).error ?? "Chat request failed");
+      addMessage(
+        "error",
+        (err as { error?: string }).error ?? "Chat request failed",
+      );
       return;
     }
 
@@ -189,7 +209,10 @@ const handleSend = async (): Promise<void> => {
 const handleContinue = (): void => {
   if (ledger.length === 0) return;
 
-  const summary = ledger.map((r) => r.intent).join("; ").slice(0, 200);
+  const summary = ledger
+    .map((r) => r.intent)
+    .join("; ")
+    .slice(0, 200);
   $<HTMLInputElement>("summary").value = summary;
   showView("continue-view");
 };
@@ -268,6 +291,9 @@ const renderJobError = (message: string): void => {
   $("new-session-btn").classList.remove("hidden");
 };
 
+const githubLinkLabel = (url: string, repo: string): string =>
+  url.includes("/compare/") ? `${repo} changes` : `${repo} PR`;
+
 const pollJob = async (jobId: string): Promise<void> => {
   const poll = async (): Promise<void> => {
     const res = await apiFetch(`/jobs/${jobId}`);
@@ -286,8 +312,8 @@ const pollJob = async (jobId: string): Promise<void> => {
         <p><strong>Done!</strong></p>
         ${job.jiraTicketUrl ? `<p><a href="${job.jiraTicketUrl}" target="_blank" rel="noopener">JIRA ticket</a></p>` : ""}
         ${job.googleDocUrl ? `<p><a href="${job.googleDocUrl}" target="_blank" rel="noopener">Google Doc</a></p>` : ""}
-        ${job.ferrumPrUrl ? `<p><a href="${job.ferrumPrUrl}" target="_blank" rel="noopener">Ferrum PR</a></p>` : ""}
-        ${job.graphqlPrUrl ? `<p><a href="${job.graphqlPrUrl}" target="_blank" rel="noopener">GraphQL PR</a></p>` : ""}
+        ${job.ferrumPrUrl ? `<p><a href="${job.ferrumPrUrl}" target="_blank" rel="noopener">${githubLinkLabel(job.ferrumPrUrl, "Ferrum")}</a></p>` : ""}
+        ${job.graphqlPrUrl ? `<p><a href="${job.graphqlPrUrl}" target="_blank" rel="noopener">${githubLinkLabel(job.graphqlPrUrl, "GraphQL")}</a></p>` : ""}
       `;
       $("new-session-btn").classList.remove("hidden");
       return;
@@ -360,7 +386,10 @@ document.addEventListener("DOMContentLoaded", () => {
       })) as { ok?: boolean };
 
       if (!result?.ok) {
-        addMessage("error", "Could not undo that change. The element may no longer exist.");
+        addMessage(
+          "error",
+          "Could not undo that change. The element may no longer exist.",
+        );
         return;
       }
 

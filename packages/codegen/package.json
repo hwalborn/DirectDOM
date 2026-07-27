@@ -19,7 +19,6 @@
     "@directdom/shared": "*",
     "octokit": "^4.0.2",
     "simple-git": "^3.27.0",
-    "ts-morph": "^24.0.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {

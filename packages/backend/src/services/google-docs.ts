@@ -1,6 +1,5 @@
 import { google } from "googleapis";
 import type { ChangeRecord, SessionMetadata } from "@directdom/shared";
-import { GOOGLE_DOC_TEMPLATE_ID } from "@directdom/shared";
 import { config, useMockIntegrations } from "../config.js";
 
 const getDocsClient = () => {
@@ -40,7 +39,7 @@ export const createOrUpdateGoogleDoc = async (params: {
   if (useMockIntegrations || !config.google.clientId) {
     const docId = metadata.googleDocUrl
       ? extractDocId(metadata.googleDocUrl)
-      : GOOGLE_DOC_TEMPLATE_ID;
+      : config.google.docTemplateId;
     return {
       docId,
       docUrl: `https://docs.google.com/document/d/${docId}/edit`,
@@ -59,7 +58,7 @@ export const createOrUpdateGoogleDoc = async (params: {
         name: metadata.summary ?? `DirectDOM Change Request ${Date.now()}`,
       },
     });
-    docId = copy.data.id ?? GOOGLE_DOC_TEMPLATE_ID;
+    docId = copy.data.id ?? config.google.docTemplateId;
   }
 
   const changeSection = buildChangeSection({

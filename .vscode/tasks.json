@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Start Backend (debug)",
+      "type": "shell",
+      "command": "${workspaceFolder}/node_modules/.bin/tsx --inspect=9229 src/index.ts",
+      "options": {
+        "cwd": "${workspaceFolder}/packages/backend",
+        "env": {
+          "NODE_OPTIONS": ""
+        }
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "custom",
+        "pattern": {
+          "regexp": "."
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".",
+          "endsPattern": "DirectDOM backend listening"
+        }
+      }
+    }
+  ]
+}

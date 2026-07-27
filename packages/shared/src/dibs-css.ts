@@ -14,22 +14,7 @@ export const toDibsCssDomClass = (className: string): string => {
 };
 
 export const normalizeDibsCssClassNames = (classNames: string): string =>
-  classNames
-    .split(/\s+/)
-    .filter(Boolean)
-    .map(toDibsCssDomClass)
-    .join(" ");
-
-export const parseDibsCssClasses = (dtsContent: string): string[] => {
-  const classes: string[] = [];
-  const pattern = /^\s+(\w+):\s*string;/gm;
-
-  for (const match of dtsContent.matchAll(pattern)) {
-    classes.push(match[1]);
-  }
-
-  return classes;
-};
+  classNames.split(/\s+/).filter(Boolean).map(toDibsCssDomClass).join(" ");
 
 /** Longest-match prefixes for mutually exclusive dibs-css utility classes. */
 const CONFLICT_PREFIXES = [
@@ -102,8 +87,11 @@ export const resolveClassNameConflicts = (
   return [...kept, ...incoming].join(" ");
 };
 
-/** Convert tailwind-style kebab tokens to camelCase dibs-css keys (text-blue-500 -> textBlue500). */
-export const tailwindTokenToCamelCase = (token: string): string =>
+/** Convert tailwind-style kebab tokens to camelCase dibs-css keys (text-blue-500 -> textBlue500).
+ * Even though our LLM is connected to the dibs-css MCP, it will often return tailwind-style class names somtimes
+ * This is a fallback to get the correct class name for ferrum
+ */
+const tailwindTokenToCamelCase = (token: string): string =>
   token
     .split("-")
     .map((part, index) =>
@@ -111,7 +99,7 @@ export const tailwindTokenToCamelCase = (token: string): string =>
     )
     .join("");
 
-export const findClosestDibsCssClass = (
+const findClosestDibsCssClass = (
   token: string,
   allowedClasses: string[],
 ): string | null => {
@@ -129,7 +117,8 @@ export const findClosestDibsCssClass = (
 
   const lower = stripped.toLowerCase();
   const exactInsensitive = categoryMatches.find(
-    (cls) => cls.toLowerCase() === lower || cls.toLowerCase() === camel.toLowerCase(),
+    (cls) =>
+      cls.toLowerCase() === lower || cls.toLowerCase() === camel.toLowerCase(),
   );
   if (exactInsensitive) return exactInsensitive;
 
@@ -162,51 +151,4 @@ export const resolveClassNamesToAllowlist = (
     resolved: normalizeDibsCssClassNames(resolvedTokens.join(" ")),
     unresolved,
   };
-};
-
-export const filterRelevantDibsCssClasses = (params: {
-  classes: string[];
-  message: string;
-  currentClassNames?: string;
-  limit?: number;
-}): string[] => {
-  const { classes, message, currentClassNames, limit = 60 } = params;
-  const tokens = message
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter((token) => token.length > 2);
-
-  const currentKeys = new Set(
-    (currentClassNames ?? "")
-      .split(/\s+/)
-      .map(stripDibsCssPrefix)
-      .filter(Boolean),
-  );
-
-  const scored = classes.map((className) => {
-    const lower = className.toLowerCase();
-    let score = 0;
-
-    if (currentKeys.has(className)) {
-      score += 10;
-    }
-
-    for (const token of tokens) {
-      if (lower.includes(token)) {
-        score += 3;
-      }
-    }
-
-    if (/^(text|bg|font|p|m|flex|grid|border|rounded)/.test(className)) {
-      score += 1;
-    }
-
-    return { className, score };
-  });
-
-  return scored
-    .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score || a.className.localeCompare(b.className))
-    .slice(0, limit)
-    .map((entry) => entry.className);
 };

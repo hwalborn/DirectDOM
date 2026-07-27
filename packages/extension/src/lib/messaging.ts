@@ -2,21 +2,7 @@ import { matchHostname } from "@directdom/shared";
 
 declare const __API_URL__: string;
 
-export const API_URL: string = __API_URL__;
-
-export type MessageType =
-  | "GET_TAB_CONTEXT"
-  | "TAB_CONTEXT"
-  | "START_PICKER"
-  | "STOP_PICKER"
-  | "ELEMENT_SELECTED"
-  | "APPLY_PATCH"
-  | "PATCH_APPLIED"
-  | "UNDO_CHANGE"
-  | "CHANGE_UNDONE"
-  | "GET_LEDGER"
-  | "LEDGER_UPDATE"
-  | "SESSION_UPDATE";
+const API_URL: string = __API_URL__;
 
 export type ExtensionMessage =
   | { type: "GET_TAB_CONTEXT" }
@@ -52,12 +38,12 @@ export class TabConnectionError extends Error {
   }
 }
 
-export const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
+const getActiveTab = async (): Promise<chrome.tabs.Tab | undefined> => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab;
 };
 
-export const isTabAllowed = (url?: string): boolean => {
+const isTabAllowed = (url?: string): boolean => {
   if (!url) return false;
   try {
     const { hostname } = new URL(url);
@@ -122,17 +108,11 @@ export const sendToBackground = async <T = unknown>(
   return chrome.runtime.sendMessage(message) as Promise<T>;
 };
 
-export const getAuthToken = async (): Promise<string | null> => {
+const getAuthToken = async (): Promise<string | null> => {
+  // We'll probably want to refactor this to get the auth token for 1stDibs
+  // We want to use the `chrome.cookies.get` to grab it from here
   const result = await chrome.storage.local.get("authToken");
   return (result.authToken as string) ?? null;
-};
-
-export const setAuthToken = async (token: string | null): Promise<void> => {
-  if (token) {
-    await chrome.storage.local.set({ authToken: token });
-  } else {
-    await chrome.storage.local.remove("authToken");
-  }
 };
 
 export const apiFetch = async (

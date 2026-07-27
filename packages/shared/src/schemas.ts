@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { normalizeDibsCssClassNames } from "./dibs-css.js";
 
-export const ConfidenceSchema = z.enum(["high", "medium", "low"]);
-export type Confidence = z.infer<typeof ConfidenceSchema>;
+const ConfidenceSchema = z.enum(["high", "medium", "low"]);
 
-export const BoundingBoxSchema = z.object({
+const BoundingBoxSchema = z.object({
   x: z.number(),
   y: z.number(),
   width: z.number(),
@@ -12,7 +11,7 @@ export const BoundingBoxSchema = z.object({
 });
 export type BoundingBox = z.infer<typeof BoundingBoxSchema>;
 
-export const ElementSnapshotSchema = z.object({
+const ElementSnapshotSchema = z.object({
   tagName: z.string(),
   textContent: z.string().optional(),
   className: z.string().optional(),
@@ -35,16 +34,6 @@ export const ElementSnapshotSchema = z.object({
   childTagSummary: z.string().optional(),
 });
 export type ElementSnapshot = z.infer<typeof ElementSnapshotSchema>;
-
-export const PatchTypeSchema = z.enum([
-  "textContent",
-  "className",
-  "inlineStyle",
-  "attribute",
-  "insertElement",
-  "swapElement",
-]);
-export type PatchType = z.infer<typeof PatchTypeSchema>;
 
 const DOM_PATCH_TYPES = [
   "textContent",
@@ -87,7 +76,38 @@ const isDomPatchType = (
 ): value is (typeof DOM_PATCH_TYPES)[number] =>
   (DOM_PATCH_TYPES as readonly string[]).includes(value);
 
-/** Coerce common LLM patch shapes into the DomPatch discriminated union. */
+/**
+ * Coerce common LLM patch shapes into the DomPatch discriminated union.
+ * The LLM will often return a patch in a different shape than we expect,
+ *  so we need to coerce it into the expected shape.
+ * Normalizes aliases:
+ * ```
+ *    text, innerText, copy       → textContent
+ *    class, classes, tailwind    → className
+ *    inline, inlineStyle         → inlineStyle
+ *    attr                        → attribute
+ *    insert, clone, duplicate    → insertElement
+ *    swap, component             → swapElement
+ * ```
+ *
+ * Infers missing or invalid types:
+ * Allows something like `{ className: "dc-textBlue600", mode: "merge" }` to become `{
+ *   type: "className",
+ *   value: "dc-textBlue600",
+ *   mode: "merge"
+ * }`
+ *
+ * Normalizes proerty names
+ * component → componentName
+ * className or classes → value
+ * properties or cssProperties → value
+ * insertMode → mode
+ * label or newLabel → textContent
+ * text or textContent → value
+ * attribute or attr → name
+ *
+ * DOES NOT VALIDATE THE RESULT, THAT'S parseDomPatch's job!
+ * */
 export const normalizeDomPatch = (raw: unknown): unknown => {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
     return raw;
@@ -123,13 +143,16 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
     } else if (
       obj.position !== undefined ||
       obj.insertMode !== undefined ||
-      (typeof obj.html === "string" && /duplicate|copy|clone|add|insert/i.test(String(obj.type ?? "")))
+      (typeof obj.html === "string" &&
+        /duplicate|copy|clone|add|insert/i.test(String(obj.type ?? "")))
     ) {
       type = "insertElement";
     } else if (
       obj.properties !== undefined ||
       obj.cssProperties !== undefined ||
-      (obj.type === "style" && typeof obj.value === "object" && obj.value !== null)
+      (obj.type === "style" &&
+        typeof obj.value === "object" &&
+        obj.value !== null)
     ) {
       type = "inlineStyle";
     } else if (obj.name !== undefined && obj.value !== undefined) {
@@ -147,7 +170,11 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
 
   obj.type = type;
 
-  if (type === "swapElement" && !obj.componentName && typeof obj.component === "string") {
+  if (
+    type === "swapElement" &&
+    !obj.componentName &&
+    typeof obj.component === "string"
+  ) {
     obj.componentName = obj.component;
   }
 
@@ -161,10 +188,18 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
   }
 
   if (type === "inlineStyle") {
-    if (!obj.value && typeof obj.properties === "object" && obj.properties !== null) {
+    if (
+      !obj.value &&
+      typeof obj.properties === "object" &&
+      obj.properties !== null
+    ) {
       obj.value = obj.properties;
     }
-    if (!obj.value && typeof obj.cssProperties === "object" && obj.cssProperties !== null) {
+    if (
+      !obj.value &&
+      typeof obj.cssProperties === "object" &&
+      obj.cssProperties !== null
+    ) {
       obj.value = obj.cssProperties;
     }
     if (typeof obj.value === "string") {
@@ -213,7 +248,7 @@ export const normalizeDomPatch = (raw: unknown): unknown => {
   return obj;
 };
 
-export const DomPatchSchema = z.discriminatedUnion("type", [
+const DomPatchSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("textContent"),
     value: z.string(),
@@ -251,7 +286,9 @@ export type DomPatch = z.infer<typeof DomPatchSchema>;
 
 export const parseDomPatch = (
   raw: unknown,
-): { success: true; data: DomPatch } | { success: false; error: z.ZodError } => {
+):
+  | { success: true; data: DomPatch }
+  | { success: false; error: z.ZodError } => {
   const result = DomPatchSchema.safeParse(normalizeDomPatch(raw));
   if (!result.success) {
     return result;
@@ -270,14 +307,13 @@ export const parseDomPatch = (
   return result;
 };
 
-export const ChangeTargetSchema = z.object({
+const ChangeTargetSchema = z.object({
   selector: z.string(),
   xpath: z.string().optional(),
   reactFiberHint: z.string().optional(),
   storybookId: z.string().optional(),
   boundingBox: BoundingBoxSchema,
 });
-export type ChangeTarget = z.infer<typeof ChangeTargetSchema>;
 
 export const ChangeRecordSchema = z.object({
   id: z.string(),
@@ -291,10 +327,10 @@ export const ChangeRecordSchema = z.object({
 });
 export type ChangeRecord = z.infer<typeof ChangeRecordSchema>;
 
-export const EnvironmentSchema = z.enum(["qa", "stage", "prod", "unknown"]);
+const EnvironmentSchema = z.enum(["qa", "stage", "prod", "unknown"]);
 export type Environment = z.infer<typeof EnvironmentSchema>;
 
-export const SessionMetadataSchema = z.object({
+const SessionMetadataSchema = z.object({
   jiraProjectKey: z.string().min(1),
   jiraTicketKeys: z.array(z.string()).optional(),
   jiraIssueType: z.string().default("Task"),
@@ -305,7 +341,7 @@ export const SessionMetadataSchema = z.object({
 });
 export type SessionMetadata = z.infer<typeof SessionMetadataSchema>;
 
-export const SessionSchema = z.object({
+const SessionSchema = z.object({
   id: z.string(),
   pageUrl: z.string(),
   hostname: z.string(),
@@ -318,20 +354,8 @@ export const SessionSchema = z.object({
 });
 export type Session = z.infer<typeof SessionSchema>;
 
-export const GraphqlImpactSchema = z.enum([
-  "none",
-  "query-only",
-  "schema-change",
-]);
+const GraphqlImpactSchema = z.enum(["none", "query-only", "schema-change"]);
 export type GraphqlImpact = z.infer<typeof GraphqlImpactSchema>;
-
-export const ChatMessageSchema = z.object({
-  role: z.enum(["user", "assistant", "system"]),
-  content: z.string(),
-  patch: DomPatchSchema.optional(),
-  changeRecord: ChangeRecordSchema.optional(),
-});
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 export const ChatRequestSchema = z.object({
   sessionId: z.string(),
@@ -341,36 +365,26 @@ export const ChatRequestSchema = z.object({
   pageUrl: z.string(),
   boundingBox: BoundingBoxSchema.optional(),
 });
-export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 
 export const CreateSessionRequestSchema = z.object({
   pageUrl: z.string().url(),
   hostname: z.string(),
 });
-export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 
 export const ContinueRequestSchema = z.object({
   metadata: SessionMetadataSchema,
 });
-export type ContinueRequest = z.infer<typeof ContinueRequestSchema>;
 
-export const JobStatusSchema = z.enum([
-  "pending",
-  "running",
-  "completed",
-  "failed",
-]);
-export type JobStatus = z.infer<typeof JobStatusSchema>;
+const JobStatusSchema = z.enum(["pending", "running", "completed", "failed"]);
 
-export const JobStepSchema = z.object({
+const JobStepSchema = z.object({
   name: z.string(),
   status: JobStatusSchema,
   message: z.string().optional(),
   url: z.string().optional(),
 });
-export type JobStep = z.infer<typeof JobStepSchema>;
 
-export const SubmitJobSchema = z.object({
+const SubmitJobSchema = z.object({
   id: z.string(),
   sessionId: z.string(),
   status: JobStatusSchema,
@@ -386,7 +400,7 @@ export const SubmitJobSchema = z.object({
 });
 export type SubmitJob = z.infer<typeof SubmitJobSchema>;
 
-export const ComponentRegistryEntrySchema = z.object({
+const ComponentRegistryEntrySchema = z.object({
   name: z.string(),
   importPath: z.string(),
   storybookId: z.string().optional(),
@@ -397,18 +411,11 @@ export type ComponentRegistryEntry = z.infer<
   typeof ComponentRegistryEntrySchema
 >;
 
-export const ComponentRegistrySchema = z.object({
+const ComponentRegistrySchema = z.object({
   version: z.string(),
   components: z.array(ComponentRegistryEntrySchema),
-  /** camelCase keys from dibs-css.module.d.css.ts; DOM uses dc-<key> */
-  dibsCssClasses: z.array(z.string()).optional(),
-  /** @deprecated use dibsCssClasses */
-  tailwindAllowlist: z.array(z.string()).optional(),
 });
 export type ComponentRegistry = z.infer<typeof ComponentRegistrySchema>;
-
-export const GOOGLE_DOC_TEMPLATE_ID =
-  "1i9TTXYwjwcTf81L2zdGch_n8VtI2tqmqwvsC4tyNkqo";
 
 export const FERRUM_REPO = "1stdibs/ferrum";
 export const GRAPHQL_REPO = "1stdibs/dibs-graphql";
