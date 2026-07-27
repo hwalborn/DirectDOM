@@ -60,7 +60,7 @@ const parsePageUrl = (pageUrl: string): PageUrlContext | null => {
     if (hostname.includes("adminv2")) {
       hostFamily = "admin";
     } else if (
-      /^(qa|stage)(\.intranet)?\.1stdibs\.com$/.test(hostname) ||
+      /^(qa|stage|local)(\.intranet)?\.1stdibs\.com$/.test(hostname) ||
       /^(www\.)?1stdibs\.com$/.test(hostname)
     ) {
       hostFamily = "buyer";

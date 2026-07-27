@@ -41,6 +41,7 @@ Load the extension from `packages/extension/dist` in Chrome (`chrome://extension
 
 ## Allowlisted hosts
 
+- `adminv2.local.intranet.1stdibs.com` / `local.intranet.1stdibs.com` (local)
 - `adminv2.{qa,stage}.intranet.1stdibs.com`
 - `adminv2.{qa,stage}.1stdibs.com`
 - `{qa,stage}.intranet.1stdibs.com`

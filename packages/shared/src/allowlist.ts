@@ -5,6 +5,14 @@ const ALLOWLIST_PATTERNS: Array<{
   environment: Environment;
 }> = [
   {
+    pattern: /^adminv2\.local\.intranet\.1stdibs\.com$/,
+    environment: "qa",
+  },
+  {
+    pattern: /^local\.intranet\.1stdibs\.com$/,
+    environment: "qa",
+  },
+  {
     pattern: /^adminv2\.qa\.intranet\.1stdibs\.com$/,
     environment: "qa",
   },

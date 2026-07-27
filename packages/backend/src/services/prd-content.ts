@@ -96,7 +96,7 @@ export const DIRECTDOM_PRD_REPLACEMENTS: PrdTextReplacement[] = [
       "Extension (packages/extension):\n" +
       "• Side panel chat UI with element picker (⊕), change ledger, undo, Continue/Submit.\n" +
       "• Content script applies patches: textContent, className (Tailwind allowlist), attribute, swapElement (registry-only).\n" +
-      "• Host allowlist: adminv2.{qa,stage}.1stdibs.com, {qa,stage}.1stdibs.com, intranet variants, adminv2.1stdibs.com, 1stdibs.com.\n" +
+      "• Host allowlist: adminv2.{local,qa,stage}.intranet.1stdibs.com, {local,qa,stage}.intranet.1stdibs.com, adminv2.{qa,stage}.1stdibs.com, {qa,stage}.1stdibs.com, adminv2.1stdibs.com, 1stdibs.com.\n" +
       "• Prod guardrails: confirmation dialog before Submit; draft PRs tagged prod-origin.\n\n" +
       "Backend (packages/backend):\n" +
       "• Fastify API: sessions, chat→patch LLM, ledger, Continue metadata, async Submit jobs.\n" +
