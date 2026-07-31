@@ -133,6 +133,12 @@ const applyPatch = (
         reactFiberHint: getReactFiberHint(inserted),
         boundingBox: getBoundingBox(inserted),
       },
+      anchor: {
+        selector: targetSelector,
+        xpath: generateXPath(element),
+        reactFiberHint: getReactFiberHint(element),
+        boundingBox: getBoundingBox(element),
+      },
       before,
       after,
       patch,

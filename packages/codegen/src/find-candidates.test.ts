@@ -3,11 +3,16 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { ChangeRecord } from "@directdom/shared";
 import {
+  buildStructuralCodegenHints,
   collectSearchSignals,
+  extractContentSnippets,
+  extractDataTnStaticParts,
   extractNlSignals,
   findCandidateFiles,
   matchDataTnInSource,
+  isFuzzyTnMatch,
   normalizeTnValue,
+  tokenizeTnValue,
 } from "./find-candidates.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -102,6 +107,12 @@ describe("extractNlSignals", () => {
   });
 });
 
+describe("isFuzzyTnMatch", () => {
+  it("matches abbreviated btn to button suffix", () => {
+    expect(isFuzzyTnMatch("upload-submit-btn", "submitButton")).toBe(true);
+  });
+});
+
 describe("matchDataTnInSource", () => {
   it("matches exact literals", () => {
     expect(
@@ -131,6 +142,137 @@ describe("matchDataTnInSource", () => {
         value: "item-upload-submit-button",
       }),
     ).toBeNull();
+  });
+
+  it("fuzzy-matches token-overlap on abbreviated DOM values", () => {
+    const source = "data-tn={`${dataTn}-submitButton`}";
+    expect(extractDataTnStaticParts(source)).toEqual(
+      expect.arrayContaining(["submitButton"]),
+    );
+    expect(
+      matchDataTnInSource(source, {
+        name: "data-tn",
+        value: "upload-submit-btn",
+      }),
+    ).toBe("fuzzy");
+  });
+
+  it("fuzzy-matches minor typos in data-tn", () => {
+    const source = 'data-tn="product-title"';
+    expect(
+      matchDataTnInSource(source, {
+        name: "data-tn",
+        value: "product-titel",
+      }),
+    ).toBe("fuzzy");
+  });
+});
+
+describe("tokenizeTnValue", () => {
+  it("splits kebab and camel segments", () => {
+    expect(tokenizeTnValue("item-upload-submitButton")).toEqual(
+      expect.arrayContaining(["item", "upload", "submit", "button"]),
+    );
+  });
+});
+
+describe("extractContentSnippets", () => {
+  it("pulls text, classes, and component tags from HTML", () => {
+    const snippets = extractContentSnippets(
+      '<button class="dc-textBlue600 dc-pSmall">Filter results</button>',
+    );
+    expect(snippets).toEqual(
+      expect.arrayContaining(["Filter results", "textBlue600", "pSmall", "button"]),
+    );
+  });
+});
+
+describe("collectSearchSignals for insertElement", () => {
+  it("prefers anchor fiber hint and parent context over inserted target", () => {
+    const signals = collectSearchSignals([
+      baseRecord({
+        target: {
+          selector: "button.dc-directdom-copy",
+          reactFiberHint: "Anonymous",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        anchor: {
+          selector: '[data-tn="inventory-toolbar"]',
+          reactFiberHint: "InventoryToolbar",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        before: {
+          tagName: "DIV",
+          parentTagName: "SECTION",
+          parentClassName: "dc-flexCol",
+          childTagSummary: "button, span",
+        },
+        after: {
+          tagName: "BUTTON",
+          outerHTML:
+            '<button class="dc-textBlue600">Filter</button>',
+        },
+        patch: {
+          type: "insertElement",
+          position: "after",
+          mode: "html",
+          html: '<button class="dc-textBlue600">Filter</button>',
+        },
+      }),
+    ]);
+
+    expect(signals.fiberHints).toEqual(["InventoryToolbar"]);
+    expect(signals.fiberHints).not.toContain("Anonymous");
+    expect(signals.dataAttrs).toEqual(
+      expect.arrayContaining([{ name: "data-tn", value: "inventory-toolbar" }]),
+    );
+    expect(signals.contentSnippets).toEqual(
+      expect.arrayContaining(["Filter", "textBlue600", "button"]),
+    );
+    expect(signals.structuralAnchors).toEqual([
+      expect.objectContaining({
+        position: "after",
+        parentTagName: "SECTION",
+        anchorTagName: "DIV",
+      }),
+    ]);
+  });
+});
+
+describe("buildStructuralCodegenHints", () => {
+  it("summarizes insert anchor context for codegen", () => {
+    const hints = buildStructuralCodegenHints([
+      baseRecord({
+        intent: "Add a filter button below the toolbar",
+        target: {
+          selector: "button",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        anchor: {
+          selector: '[data-tn="inventory-toolbar"]',
+          reactFiberHint: "InventoryToolbar",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        before: { tagName: "DIV", parentTagName: "SECTION" },
+        after: { tagName: "BUTTON", outerHTML: '<button>Filter</button>' },
+        patch: {
+          type: "insertElement",
+          position: "after",
+          mode: "html",
+          html: '<button class="dc-textBlue600">Filter</button>',
+        },
+      }),
+    ]);
+
+    expect(hints[0]).toEqual(
+      expect.objectContaining({
+        operation: "insertElement",
+        position: "after",
+        anchorFiberHint: "InventoryToolbar",
+        anchorSelector: '[data-tn="inventory-toolbar"]',
+        parentTagName: "SECTION",
+      }),
+    );
   });
 });
 
@@ -317,6 +459,48 @@ describe("findCandidateFiles", () => {
     );
 
     expect(candidates[0]?.path).toContain("SubmitButton.tsx");
+  });
+
+  it("finds InventoryToolbar when inserting relative to anchor, not inserted node", () => {
+    const candidates = findCandidateFiles(
+      FIXTURE_REPO,
+      [
+        baseRecord({
+          intent: "Add filter button below toolbar",
+          target: {
+            selector: "button",
+            reactFiberHint: "Anonymous",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          anchor: {
+            selector: '[data-tn="inventory-toolbar"]',
+            reactFiberHint: "InventoryToolbar",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: {
+            tagName: "DIV",
+            parentTagName: "SECTION",
+          },
+          after: {
+            tagName: "BUTTON",
+            outerHTML:
+              '<button class="dc-textBlue600">Filter listings</button>',
+          },
+          patch: {
+            type: "insertElement",
+            position: "after",
+            mode: "html",
+            html: '<button class="dc-textBlue600">Filter listings</button>',
+          },
+        }),
+      ],
+      {
+        pageUrl:
+          "https://adminv2.qa.1stdibs.com/internal/inventory-management/taxonomy",
+      },
+    );
+
+    expect(candidates[0]?.path).toContain("InventoryToolbar.tsx");
   });
 
   it("finds DealerInventoryManager for dealer DIM URL, not dealer-tools advertising", () => {

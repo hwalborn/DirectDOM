@@ -113,13 +113,24 @@ const SCORE_FIBER_FILENAME = 100;
 const SCORE_FIBER_EXPORT = 80;
 const SCORE_DATA_ATTR = 60;
 const SCORE_DATA_ATTR_PARTIAL = 45;
+const SCORE_DATA_ATTR_FUZZY = 35;
 const SCORE_APP_MATCH = 50;
 const SCORE_TEXT = 40;
+const SCORE_TEXT_PARTIAL = 28;
+const SCORE_CONTENT_SNIPPET = 32;
+const SCORE_CONTENT_SNIPPET_PARTIAL = 20;
 const SCORE_NL_PHRASE = 40;
 const SCORE_PATH_SEGMENT = 30;
 const SCORE_CLASS_TOKEN = 25;
 const SCORE_FIBER_PARTIAL = 20;
 const SCORE_NL_TOKEN = 12;
+const SCORE_STRUCTURAL_ANCHOR = 55;
+const SCORE_COMPONENT_NAME = 70;
+
+/** Minimum token-overlap ratio for fuzzy data-tn matching. */
+const FUZZY_TN_TOKEN_OVERLAP = 0.55;
+/** Max edit distance (as fraction of shorter string) for fuzzy data-tn. */
+const FUZZY_TN_EDIT_RATIO = 0.25;
 
 type SearchSignals = {
   fiberHints: string[];
@@ -132,6 +143,18 @@ type SearchSignals = {
   nlPhrases: string[];
   /** Significant single tokens from user intent. */
   nlTokens: string[];
+  /** Distinctive strings from inserted/swapped HTML for content search. */
+  contentSnippets: string[];
+  /** Component registry names from swapElement patches. */
+  componentNames: string[];
+  /** Parent/anchor context for structural insertions. */
+  structuralAnchors: Array<{
+    parentTagName?: string;
+    parentClassName?: string;
+    childTagSummary?: string;
+    position?: "before" | "after" | "inside";
+    anchorTagName?: string;
+  }>;
 };
 
 export type FindCandidateOptions = {
@@ -231,6 +254,160 @@ const parseFiberHints = (raw: string | undefined): string[] => {
 export const normalizeTnValue = (value: string): string =>
   value.toLowerCase().replace(/[^a-z0-9]/g, "");
 
+/** Split kebab/camel/snake data-tn values into searchable tokens. */
+export const tokenizeTnValue = (
+  value: string,
+  minLen = MIN_DATA_TN_PART_LEN,
+): string[] => {
+  const withSpaces = value
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ");
+  return [
+    ...new Set(
+      withSpaces
+        .split(/\s+/)
+        .map((part) => normalizeTnValue(part))
+        .filter((part) => part.length >= minLen),
+    ),
+  ];
+};
+
+const levenshteinDistance = (a: string, b: string): number => {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+
+  const prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  const curr = new Array<number>(b.length + 1);
+
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(
+        curr[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost,
+      );
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
+};
+
+const tokenOverlapRatio = (a: string[], b: string[]): number => {
+  if (a.length === 0 || b.length === 0) return 0;
+  const setB = new Set(b);
+  const overlap = a.filter((token) => setB.has(token)).length;
+  return overlap / Math.max(a.length, b.length);
+};
+
+const TN_TOKEN_ALIASES: Record<string, string[]> = {
+  btn: ["button"],
+  btns: ["buttons"],
+  img: ["image"],
+  imgs: ["images"],
+  nav: ["navigation"],
+};
+
+const expandTnToken = (token: string): string[] => {
+  const aliases = TN_TOKEN_ALIASES[token] ?? [];
+  return [token, ...aliases];
+};
+
+const tokensRoughlyMatch = (a: string, b: string): boolean => {
+  for (const at of expandTnToken(a)) {
+    for (const bt of expandTnToken(b)) {
+      if (at === bt || at.includes(bt) || bt.includes(at)) return true;
+      if (at.length >= 3 && bt.length >= 3 && (at.startsWith(bt) || bt.startsWith(at))) {
+        return true;
+      }
+    }
+  }
+  return false;
+};
+
+const fuzzyTokenOverlap = (valueTokens: string[], partTokens: string[]): number => {
+  if (partTokens.length === 0) return 0;
+  let matched = 0;
+  for (const partToken of partTokens) {
+    if (valueTokens.some((valueToken) => tokensRoughlyMatch(valueToken, partToken))) {
+      matched++;
+    }
+  }
+  return matched / partTokens.length;
+};
+
+export const isFuzzyTnMatch = (rawValue: string, rawPart: string): boolean => {
+  const normValue = normalizeTnValue(rawValue);
+  const normPart = normalizeTnValue(rawPart);
+  if (normValue.length < MIN_DATA_TN_PART_LEN || normPart.length < MIN_DATA_TN_PART_LEN) {
+    return false;
+  }
+
+  if (normValue.includes(normPart) || normPart.includes(normValue)) {
+    return true;
+  }
+
+  const valueTokens = tokenizeTnValue(rawValue, 3);
+  const partTokens = tokenizeTnValue(rawPart, 3);
+  if (fuzzyTokenOverlap(valueTokens, partTokens) >= FUZZY_TN_TOKEN_OVERLAP) {
+    return true;
+  }
+  if (tokenOverlapRatio(valueTokens, partTokens) >= FUZZY_TN_TOKEN_OVERLAP) {
+    return true;
+  }
+
+  if (normPart.length > normValue.length * 2) return false;
+
+  const maxLen = Math.max(normValue.length, normPart.length);
+  const dist = levenshteinDistance(normValue, normPart);
+  return dist / maxLen <= FUZZY_TN_EDIT_RATIO;
+};
+
+const stripDirectdomCopySuffix = (value: string): string =>
+  value.replace(/-directdom-copy$/i, "");
+
+/** Extract searchable text/class/tag snippets from rendered HTML. */
+export const extractContentSnippets = (html: string | undefined): string[] => {
+  if (!html?.trim()) return [];
+  const snippets = new Set<string>();
+
+  for (const match of html.matchAll(/>([^<]{3,80})</g)) {
+    const text = match[1].trim();
+    if (text && !/^\s*$/.test(text)) snippets.add(text);
+  }
+
+  for (const match of html.matchAll(/\bclass=["']([^"']+)["']/gi)) {
+    for (const cls of match[1].split(/\s+/)) {
+      const token = stripDibsCssPrefix(cls);
+      if (token.length >= 3 && !LOW_SIGNAL_CLASS_TOKENS.has(token)) {
+        snippets.add(token);
+      }
+    }
+  }
+
+  for (const match of html.matchAll(/<([a-z][a-z0-9-]*)\b/gi)) {
+    const tag = match[1].toLowerCase();
+    if (!["div", "span", "section", "article"].includes(tag)) {
+      snippets.add(tag);
+    }
+  }
+
+  return [...snippets];
+};
+
+const pushDataAttr = (
+  attrs: Array<{ name: string; value: string }>,
+  name: string,
+  value: string | undefined,
+): void => {
+  if (!value) return;
+  const cleaned = stripDirectdomCopySuffix(value);
+  if (!cleaned || attrs.some((a) => a.value === cleaned)) return;
+  attrs.push({ name, value: cleaned });
+};
+
 /**
  * Pull static string chunks from data-tn / dataTn assignments, including
  * template literals like `data-tn={`${prefix}-submitButton`}`.
@@ -284,7 +461,7 @@ export const extractDataTnStaticParts = (content: string): string[] => {
 export const matchDataTnInSource = (
   content: string,
   attr: { name: string; value: string },
-): "exact" | "partial" | null => {
+): "exact" | "partial" | "fuzzy" | null => {
   const { name, value } = attr;
   const camel = name.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
   if (
@@ -301,17 +478,23 @@ export const matchDataTnInSource = (
   const normValue = normalizeTnValue(value);
   if (normValue.length < MIN_DATA_TN_PART_LEN) return null;
 
+  let best: "partial" | "fuzzy" | null = null;
+
   for (const part of extractDataTnStaticParts(content)) {
     const normPart = normalizeTnValue(part);
-    if (
-      normPart.length >= MIN_DATA_TN_PART_LEN &&
-      normValue.includes(normPart)
-    ) {
-      return "partial";
+    if (normPart.length < MIN_DATA_TN_PART_LEN) continue;
+
+    if (normValue.includes(normPart)) {
+      best = "partial";
+      continue;
+    }
+
+    if (!best && isFuzzyTnMatch(value, part)) {
+      best = "fuzzy";
     }
   }
 
-  return null;
+  return best;
 };
 
 /**
@@ -379,19 +562,66 @@ export const collectSearchSignals = (
   const classTokens = new Set<string>();
   const nlPhrases = new Set<string>();
   const nlTokens = new Set<string>();
+  const contentSnippets = new Set<string>();
+  const componentNames = new Set<string>();
+  const structuralAnchors: SearchSignals["structuralAnchors"] = [];
 
   for (const change of ledger) {
-    for (const hint of parseFiberHints(change.target.reactFiberHint)) {
-      fiberHints.add(hint);
+    const patch = change.patch;
+
+    if (patch.type === "insertElement" && change.anchor) {
+      for (const hint of parseFiberHints(change.anchor.reactFiberHint)) {
+        fiberHints.add(hint);
+      }
+      for (const attr of extractDataAttrs(change.anchor.selector)) {
+        pushDataAttr(dataAttrs, attr.name, attr.value);
+      }
     }
 
-    for (const attr of extractDataAttrs(change.target.selector)) {
-      dataAttrs.push(attr);
+    if (patch.type !== "insertElement") {
+      for (const hint of parseFiberHints(change.target.reactFiberHint)) {
+        fiberHints.add(hint);
+      }
+      for (const attr of extractDataAttrs(change.target.selector)) {
+        pushDataAttr(dataAttrs, attr.name, attr.value);
+      }
     }
 
-    const attrTn = change.before.attributes?.["data-tn"];
-    if (attrTn && !dataAttrs.some((a) => a.value === attrTn)) {
-      dataAttrs.push({ name: "data-tn", value: attrTn });
+    for (const attrName of ["data-tn", "data-testid"] as const) {
+      pushDataAttr(dataAttrs, attrName, change.before.attributes?.[attrName]);
+      if (patch.type === "insertElement") {
+        pushDataAttr(dataAttrs, attrName, change.after.attributes?.[attrName]);
+      }
+    }
+
+    if (patch.type === "insertElement") {
+      structuralAnchors.push({
+        parentTagName: change.before.parentTagName,
+        parentClassName: change.before.parentClassName,
+        childTagSummary: change.before.childTagSummary,
+        position: patch.position,
+        anchorTagName: change.before.tagName,
+      });
+
+      for (const snippet of extractContentSnippets(patch.html)) {
+        contentSnippets.add(snippet);
+      }
+      for (const snippet of extractContentSnippets(change.after.outerHTML)) {
+        contentSnippets.add(snippet);
+      }
+      for (const snippet of extractContentSnippets(change.after.innerHTML)) {
+        contentSnippets.add(snippet);
+      }
+    }
+
+    if (patch.type === "swapElement") {
+      componentNames.add(patch.componentName);
+      for (const snippet of extractContentSnippets(patch.html)) {
+        contentSnippets.add(snippet);
+      }
+      for (const snippet of extractContentSnippets(change.after.outerHTML)) {
+        contentSnippets.add(snippet);
+      }
     }
 
     for (const text of [
@@ -424,6 +654,9 @@ export const collectSearchSignals = (
     matchedApps,
     nlPhrases: [...nlPhrases],
     nlTokens: [...nlTokens],
+    contentSnippets: [...contentSnippets],
+    componentNames: [...componentNames],
+    structuralAnchors,
   };
 };
 
@@ -471,12 +704,70 @@ const scoreFile = (
       contentScore += SCORE_DATA_ATTR;
     } else if (match === "partial") {
       contentScore += SCORE_DATA_ATTR_PARTIAL;
+    } else if (match === "fuzzy") {
+      contentScore += SCORE_DATA_ATTR_FUZZY;
     }
   }
 
   for (const text of signals.texts) {
     if (content.includes(text)) {
       contentScore += SCORE_TEXT;
+    } else if (text.length >= MIN_TEXT_LEN + 2) {
+      const normText = text.toLowerCase();
+      const normContent = contentLower;
+      if (
+        normContent.includes(normText.slice(0, Math.max(MIN_TEXT_LEN, Math.floor(normText.length * 0.7)))) ||
+        signals.nlPhrases.some((phrase) => normContent.includes(phrase) && normText.includes(phrase))
+      ) {
+        contentScore += SCORE_TEXT_PARTIAL;
+      }
+    }
+  }
+
+  for (const snippet of signals.contentSnippets) {
+    if (snippet.length < MIN_TEXT_LEN) continue;
+    if (content.includes(snippet)) {
+      contentScore += SCORE_CONTENT_SNIPPET;
+    } else if (
+      contentLower.includes(snippet.toLowerCase()) ||
+      content.includes(`dibsCss.${snippet}`)
+    ) {
+      contentScore += SCORE_CONTENT_SNIPPET_PARTIAL;
+    }
+  }
+
+  for (const name of signals.componentNames) {
+    if (
+      content.includes(`<${name}`) ||
+      content.includes(`<${name} `) ||
+      content.includes(`import { ${name}`) ||
+      content.includes(`import ${name}`) ||
+      hasFiberExport(content, name)
+    ) {
+      contentScore += SCORE_COMPONENT_NAME;
+    } else if (content.includes(name)) {
+      contentScore += SCORE_FIBER_PARTIAL;
+    }
+  }
+
+  for (const anchor of signals.structuralAnchors) {
+    if (anchor.parentTagName && content.includes(`<${anchor.parentTagName.toLowerCase()}`)) {
+      contentScore += SCORE_STRUCTURAL_ANCHOR / 3;
+    }
+    if (anchor.childTagSummary) {
+      for (const tag of anchor.childTagSummary.split(/[,\s]+/).filter(Boolean)) {
+        if (content.includes(`<${tag.toLowerCase()}`)) {
+          contentScore += SCORE_STRUCTURAL_ANCHOR / 4;
+        }
+      }
+    }
+    for (const token of extractClassTokens(anchor.parentClassName)) {
+      if (
+        content.includes(`dibsCss.${token}`) ||
+        content.includes(`styles.${token}`)
+      ) {
+        contentScore += SCORE_CLASS_TOKEN;
+      }
     }
   }
 
@@ -549,7 +840,10 @@ const hasUsableSignals = (signals: SearchSignals): boolean =>
   signals.pathSegments.length > 0 ||
   signals.matchedApps.length > 0 ||
   signals.nlPhrases.length > 0 ||
-  signals.nlTokens.length > 0;
+  signals.nlTokens.length > 0 ||
+  signals.contentSnippets.length > 0 ||
+  signals.componentNames.length > 0 ||
+  signals.structuralAnchors.length > 0;
 
 const scoreRepoFiles = (
   repoPath: string,
@@ -586,6 +880,67 @@ const scoreRepoFiles = (
  * Score source files in a cloned repo against ledger + pageUrl signals so the
  * LLM receives likely component targets instead of inventing paths.
  */
+export type StructuralCodegenHint = {
+  changeId: string;
+  operation: "insertElement" | "swapElement";
+  position?: "before" | "after" | "inside";
+  mode?: "clone" | "html";
+  anchorSelector?: string;
+  anchorFiberHint?: string;
+  anchorTagName?: string;
+  parentTagName?: string;
+  parentClassName?: string;
+  childTagSummary?: string;
+  componentName?: string;
+  newElementPreview?: string;
+  intent: string;
+};
+
+/** Summarize structural ledger entries for codegen LLM injection context. */
+export const buildStructuralCodegenHints = (
+  ledger: ChangeRecord[],
+): StructuralCodegenHint[] =>
+  ledger
+    .filter(
+      (change): change is ChangeRecord & { patch: { type: "insertElement" | "swapElement" } } =>
+        change.patch.type === "insertElement" ||
+        change.patch.type === "swapElement",
+    )
+    .map((change) => {
+      const base = {
+        changeId: change.id,
+        operation: change.patch.type,
+        intent: change.intent,
+        parentTagName: change.before.parentTagName,
+        parentClassName: change.before.parentClassName,
+        childTagSummary: change.before.childTagSummary,
+        anchorTagName: change.before.tagName,
+        anchorSelector: change.anchor?.selector,
+        anchorFiberHint: change.anchor?.reactFiberHint,
+      };
+
+      if (change.patch.type === "insertElement") {
+        return {
+          ...base,
+          position: change.patch.position,
+          mode: change.patch.mode,
+          newElementPreview: (
+            change.patch.html ??
+            change.after.outerHTML ??
+            change.after.innerHTML
+          )?.slice(0, 600),
+        };
+      }
+
+      return {
+        ...base,
+        componentName: change.patch.componentName,
+        newElementPreview: (
+          change.patch.html ?? change.after.outerHTML
+        )?.slice(0, 600),
+      };
+    });
+
 export const findCandidateFiles = (
   repoPath: string,
   ledger: ChangeRecord[],
@@ -627,7 +982,7 @@ export const findCandidateFiles = (
 
   const signals = collectSearchSignals(ledger, context, matchedApps);
   console.log(
-    `[codegen] search signals: fiber=[${signals.fiberHints.join(", ")}] dataAttrs=${signals.dataAttrs.length} texts=${signals.texts.length} classTokens=[${signals.classTokens.slice(0, 8).join(", ")}] nlPhrases=[${signals.nlPhrases.slice(0, 6).join(", ")}] segments=[${signals.pathSegments.join(", ")}]`,
+    `[codegen] search signals: fiber=[${signals.fiberHints.join(", ")}] dataAttrs=${signals.dataAttrs.length} texts=${signals.texts.length} classTokens=[${signals.classTokens.slice(0, 8).join(", ")}] contentSnippets=[${signals.contentSnippets.slice(0, 6).join(", ")}] components=[${signals.componentNames.join(", ")}] structuralAnchors=${signals.structuralAnchors.length} nlPhrases=[${signals.nlPhrases.slice(0, 6).join(", ")}] segments=[${signals.pathSegments.join(", ")}]`,
   );
 
   if (!hasUsableSignals(signals)) return [];

@@ -29,7 +29,10 @@ import {
   resolveLlmConfig,
 } from "@directdom/shared/llm";
 import { applyStylingEdits } from "./apply-styling-edits.js";
-import { findCandidateFiles } from "./find-candidates.js";
+import {
+  buildStructuralCodegenHints,
+  findCandidateFiles,
+} from "./find-candidates.js";
 
 export type CodegenResult = {
   ferrumPrUrl?: string;
@@ -152,6 +155,9 @@ export const generateLlmEdits = async (params: {
     candidates.map((c) => `${c.path} (score=${c.score})`).join(", "),
   );
 
+  const structuralHints = buildStructuralCodegenHints(params.ledger);
+  const hasStructuralChanges = structuralHints.length > 0;
+
   const content = await completeJson(llmConfig, {
     system: `You generate file edits for a React/TypeScript repo (${params.repoName}) that uses dibs-css utility classes.
 Return JSON: { "edits": [{ "path": "relative/path/from/repo/root", "content": "full file content" }] }
@@ -161,6 +167,17 @@ Rules:
 - For styling patches (className or inlineStyle preview), map inline values back to dibsCss.<key> when possible. If the component imports a *.module.css file, update the relevant rule in that CSS file instead of adding inline styles to JSX.
 - Prefer dibsCss.<key> / classNames(...) over raw "dc-*" class strings. DOM classes use a "dc-" prefix; source uses dibsCss without that prefix (e.g. dc-textBlue600 → dibsCss.textBlue600).
 - For textContent patches, preserve the existing localization architecture. Update the relevant translation message, copy-producing function, or interpolated value; do not replace rendered text blindly across source files.
+${
+  hasStructuralChanges
+    ? `- STRUCTURAL insertElement patches: locate the ANCHOR element in source (use anchorFiberHint, anchorSelector data-tn, parentTagName, childTagSummary). Insert new JSX at the correct position:
+  - position "before" → insert sibling JSX immediately before the anchor element
+  - position "after" → insert sibling JSX immediately after the anchor element
+  - position "inside" → append as a child inside the anchor container
+  Use structuralHints for anchor context and newElementPreview for the element to add. Match sibling styling from surrounding JSX.
+- STRUCTURAL swapElement patches: replace the anchor element's JSX with the design-system component (componentName). Import from the package if needed. Use newElementPreview as the rendered target.
+- For structural changes, prefer editing the file that contains the anchor element — not a parent layout file unless the anchor is clearly rendered there.`
+    : ""
+}
 - Apply the ledger patches as minimal source changes; return the full updated file content for each edited path.
 - You MUST return at least one edit when candidates are provided and the change is a className/textContent/attribute patch.
 - Do not invent new files unless absolutely required.
@@ -168,6 +185,7 @@ Follow these repo rules: ${rules || "Use React, TypeScript, and existing dibs-cs
     user: JSON.stringify({
       pageUrl: params.pageUrl,
       changes: params.ledger,
+      structuralHints,
       candidates: candidates.map(({ path, content: fileContent, score }) => ({
         path,
         score,

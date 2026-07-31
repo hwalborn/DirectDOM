@@ -322,6 +322,8 @@ export const ChangeRecordSchema = z.object({
   timestamp: z.number(),
   intent: z.string(),
   target: ChangeTargetSchema,
+  /** Reference element for insertElement — where the new node was injected relative to. */
+  anchor: ChangeTargetSchema.optional(),
   before: ElementSnapshotSchema,
   after: ElementSnapshotSchema,
   patch: DomPatchSchema,
