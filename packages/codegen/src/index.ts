@@ -101,21 +101,31 @@ export const cloneOrPullRepo = async (
 
   const git = simpleGit();
   const cloneUrl = `https://github.com/${repo}.git`;
+  const remoteRef = `origin/${DEFAULT_BASE_BRANCH}`;
 
   try {
-    if (existsSync(join(localPath, "package.json"))) {
-      await simpleGit(localPath)
-        .checkout(DEFAULT_BASE_BRANCH)
-        .pull("origin", DEFAULT_BASE_BRANCH);
+    if (existsSync(join(localPath, ".git"))) {
+      const repoGit = simpleGit(localPath);
+      await repoGit.fetch("origin", DEFAULT_BASE_BRANCH, ["--prune"]);
+      await repoGit.checkout(DEFAULT_BASE_BRANCH);
+      await repoGit.reset(["--hard", remoteRef]);
+      await repoGit.clean("f", ["-d"]);
+      console.log(
+        `[codegen] Refreshed ${repo} to a clean ${remoteRef} at ${localPath}`,
+      );
     } else {
       await git.clone(cloneUrl, localPath, [
         "--branch",
         DEFAULT_BASE_BRANCH,
         "--single-branch",
       ]);
+      console.log(
+        `[codegen] Cloned ${repo} at ${DEFAULT_BASE_BRANCH} to ${localPath}`,
+      );
     }
   } catch (error) {
-    console.error(`Error cloning or pulling repo ${repo}:`, error);
+    console.error(`Error cloning or refreshing repo ${repo}:`, error);
+    throw error;
   }
 
   return localPath;
