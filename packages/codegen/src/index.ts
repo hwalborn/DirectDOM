@@ -29,6 +29,7 @@ import {
   resolveLlmConfig,
 } from "@directdom/shared/llm";
 import { applyStylingEdits } from "./apply-styling-edits.js";
+import { applyStructuralEdits } from "./apply-structural-edits.js";
 import {
   buildStructuralCodegenHints,
   findCandidateFiles,
@@ -139,8 +140,12 @@ export const generateLlmEdits = async (params: {
   if (!hasLlmApiKey(llmConfig)) return [];
 
   const rules = readCursorRules(params.repoPath);
+  const structuralHints = buildStructuralCodegenHints(params.ledger);
+  const hasStructuralChanges = structuralHints.length > 0;
+
   const candidates = findCandidateFiles(params.repoPath, params.ledger, {
     pageUrl: params.pageUrl,
+    maxCandidates: hasStructuralChanges ? 1 : undefined,
   });
 
   if (candidates.length === 0) {
@@ -155,8 +160,7 @@ export const generateLlmEdits = async (params: {
     candidates.map((c) => `${c.path} (score=${c.score})`).join(", "),
   );
 
-  const structuralHints = buildStructuralCodegenHints(params.ledger);
-  const hasStructuralChanges = structuralHints.length > 0;
+  const topCandidatePath = candidates[0]?.path;
 
   const content = await completeJson(llmConfig, {
     system: `You generate file edits for a React/TypeScript repo (${params.repoName}) that uses dibs-css utility classes.
@@ -164,20 +168,17 @@ Return JSON: { "edits": [{ "path": "relative/path/from/repo/root", "content": "f
 
 Rules:
 - Only edit files from the provided candidates (or a clearly related import in the same package).
+${
+  hasStructuralChanges && topCandidatePath
+    ? `- STRUCTURAL CHANGES: edit ONLY "${topCandidatePath}" (the highest-scored candidate). Do NOT edit any other candidate files.
+- Make the smallest possible diff. NEVER remove or alter export statements (keep "export default" exactly as-is).
+- insertElement: insert newElementPreview JSX at the anchor location described in structuralHints (use anchorFiberHint / anchorSelector data-tn). Respect position: before/after/inside.
+- Do NOT relocate unrelated JSX, do NOT duplicate existing blocks, do NOT modify sibling components unless required for the insert.`
+    : ""
+}
 - For styling patches (className or inlineStyle preview), map inline values back to dibsCss.<key> when possible. If the component imports a *.module.css file, update the relevant rule in that CSS file instead of adding inline styles to JSX.
 - Prefer dibsCss.<key> / classNames(...) over raw "dc-*" class strings. DOM classes use a "dc-" prefix; source uses dibsCss without that prefix (e.g. dc-textBlue600 → dibsCss.textBlue600).
 - For textContent patches, preserve the existing localization architecture. Update the relevant translation message, copy-producing function, or interpolated value; do not replace rendered text blindly across source files.
-${
-  hasStructuralChanges
-    ? `- STRUCTURAL insertElement patches: locate the ANCHOR element in source (use anchorFiberHint, anchorSelector data-tn, parentTagName, childTagSummary). Insert new JSX at the correct position:
-  - position "before" → insert sibling JSX immediately before the anchor element
-  - position "after" → insert sibling JSX immediately after the anchor element
-  - position "inside" → append as a child inside the anchor container
-  Use structuralHints for anchor context and newElementPreview for the element to add. Match sibling styling from surrounding JSX.
-- STRUCTURAL swapElement patches: replace the anchor element's JSX with the design-system component (componentName). Import from the package if needed. Use newElementPreview as the rendered target.
-- For structural changes, prefer editing the file that contains the anchor element — not a parent layout file unless the anchor is clearly rendered there.`
-    : ""
-}
 - Apply the ledger patches as minimal source changes; return the full updated file content for each edited path.
 - You MUST return at least one edit when candidates are provided and the change is a className/textContent/attribute patch.
 - Do not invent new files unless absolutely required.
@@ -186,6 +187,7 @@ Follow these repo rules: ${rules || "Use React, TypeScript, and existing dibs-cs
       pageUrl: params.pageUrl,
       changes: params.ledger,
       structuralHints,
+      primaryCandidate: topCandidatePath,
       candidates: candidates.map(({ path, content: fileContent, score }) => ({
         path,
         score,
@@ -208,8 +210,28 @@ Follow these repo rules: ${rules || "Use React, TypeScript, and existing dibs-cs
     return [];
   }
 
-  const edits = parsed.edits ?? [];
-  if (edits.length === 0) {
+  const edits = (parsed.edits ?? []).filter((edit) => {
+    if (!hasStructuralChanges || !topCandidatePath) return true;
+    if (edit.path !== topCandidatePath) {
+      console.warn(
+        `[codegen] Dropping LLM edit for non-primary candidate: ${edit.path}`,
+      );
+      return false;
+    }
+    if (!edit.content.includes("export default")) {
+      console.warn(
+        `[codegen] Dropping LLM edit missing export default: ${edit.path}`,
+      );
+      return false;
+    }
+    return true;
+  });
+
+  if (edits.length === 0 && (parsed.edits ?? []).length > 0) {
+    console.warn(
+      `[codegen] All LLM edits were filtered out for ${params.repoName}`,
+    );
+  } else if (edits.length === 0) {
     console.warn(
       `[codegen] LLM returned 0 edits for ${params.repoName} despite ${candidates.length} candidate(s). Raw (truncated): ${content.slice(0, 400)}`,
     );
@@ -377,8 +399,14 @@ export const runCodegen = async (
     session.pageUrl,
   );
 
+  const structuralResult = applyStructuralEdits(
+    ferrumPath,
+    session.ledger,
+    session.pageUrl,
+  );
+
   const ferrumFiles: Array<{ path: string; content: string }> = [
-    ...new Set(modifiedByClassName),
+    ...new Set([...modifiedByClassName, ...structuralResult.modifiedPaths]),
   ].map((absPath) => ({
     path: absPath.replace(ferrumPath + "/", ""),
     content: readFileSync(absPath, "utf-8"),
@@ -388,10 +416,23 @@ export const runCodegen = async (
     change.patch.type === "className" ||
     change.patch.type === "inlineStyle";
 
-  const changesForLlm = session.ledger.filter(
-    (change) => !isCodegenClassEdit(change) || modifiedByClassName.length === 0,
-  );
-  let generatedLlmEdits = changesForLlm.length === 0;
+  const isInsertChange = (change: (typeof session.ledger)[number]): boolean =>
+    change.patch.type === "insertElement";
+
+  const appliedStructuralIds = new Set(structuralResult.appliedChangeIds);
+
+  const changesForLlm = session.ledger.filter((change) => {
+    if (isCodegenClassEdit(change) && modifiedByClassName.length > 0) {
+      return false;
+    }
+    if (isInsertChange(change) && appliedStructuralIds.has(change.id)) {
+      return false;
+    }
+    return true;
+  });
+  let generatedLlmEdits =
+    structuralResult.appliedChangeIds.length > 0 ||
+    modifiedByClassName.length > 0;
 
   if (changesForLlm.length > 0) {
     try {
@@ -402,7 +443,7 @@ export const runCodegen = async (
         pageUrl: session.pageUrl,
         llmConfig: options.llmConfig,
       });
-      generatedLlmEdits = llmEdits.length > 0;
+      generatedLlmEdits = llmEdits.length > 0 || generatedLlmEdits;
       for (const edit of llmEdits) {
         const absPath = join(ferrumPath, edit.path);
         writeFileSync(absPath, edit.content, "utf-8");
