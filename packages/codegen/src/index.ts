@@ -28,7 +28,7 @@ import {
   hasLlmApiKey,
   resolveLlmConfig,
 } from "@directdom/shared/llm";
-import { applyClassNameEdits } from "./apply-classname-edits.js";
+import { applyStylingEdits } from "./apply-styling-edits.js";
 import { findCandidateFiles } from "./find-candidates.js";
 
 export type CodegenResult = {
@@ -158,6 +158,7 @@ Return JSON: { "edits": [{ "path": "relative/path/from/repo/root", "content": "f
 
 Rules:
 - Only edit files from the provided candidates (or a clearly related import in the same package).
+- For styling patches (className or inlineStyle preview), map inline values back to dibsCss.<key> when possible. If the component imports a *.module.css file, update the relevant rule in that CSS file instead of adding inline styles to JSX.
 - Prefer dibsCss.<key> / classNames(...) over raw "dc-*" class strings. DOM classes use a "dc-" prefix; source uses dibsCss without that prefix (e.g. dc-textBlue600 → dibsCss.textBlue600).
 - For textContent patches, preserve the existing localization architecture. Update the relevant translation message, copy-producing function, or interpolated value; do not replace rendered text blindly across source files.
 - Apply the ledger patches as minimal source changes; return the full updated file content for each edited path.
@@ -352,7 +353,7 @@ export const runCodegen = async (
     };
   }
 
-  const modifiedByClassName = applyClassNameEdits(
+  const modifiedByClassName = applyStylingEdits(
     ferrumPath,
     session.ledger,
     session.pageUrl,
@@ -365,9 +366,12 @@ export const runCodegen = async (
     content: readFileSync(absPath, "utf-8"),
   }));
 
+  const isCodegenClassEdit = (change: (typeof session.ledger)[number]): boolean =>
+    change.patch.type === "className" ||
+    change.patch.type === "inlineStyle";
+
   const changesForLlm = session.ledger.filter(
-    (change) =>
-      change.patch.type !== "className" || modifiedByClassName.length === 0,
+    (change) => !isCodegenClassEdit(change) || modifiedByClassName.length === 0,
   );
   let generatedLlmEdits = changesForLlm.length === 0;
 

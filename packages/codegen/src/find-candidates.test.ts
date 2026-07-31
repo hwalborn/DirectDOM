@@ -318,4 +318,37 @@ describe("findCandidateFiles", () => {
 
     expect(candidates[0]?.path).toContain("SubmitButton.tsx");
   });
+
+  it("finds DealerInventoryManager for dealer DIM URL, not dealer-tools advertising", () => {
+    const candidates = findCandidateFiles(
+      FIXTURE_REPO,
+      [
+        baseRecord({
+          target: {
+            selector: "h2",
+            reactFiberHint: "DealerInventoryManager",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: {
+            tagName: "H2",
+            textContent: "Listings",
+            className: "dc-sassyFontBodySmallHeavy",
+          },
+          patch: {
+            type: "className",
+            value: "dc-textDealerPrimary",
+            mode: "merge",
+          },
+        }),
+      ],
+      {
+        pageUrl:
+          "https://adminv2.qa.1stdibs.com/dealers/inventory-management",
+      },
+    );
+
+    expect(candidates[0]?.path).toContain("DealerInventoryManager.tsx");
+    expect(candidates[0]?.path).toContain("app-admin-inventory");
+    expect(candidates[0]?.path).not.toContain("AdAnalyticsPage");
+  });
 });

@@ -262,6 +262,8 @@ const DomPatchSchema = z.discriminatedUnion("type", [
     type: z.literal("inlineStyle"),
     value: z.record(z.string()),
     mode: z.enum(["replace", "merge"]).default("merge"),
+    /** dibs-css key when inline styles were resolved from MCP (for codegen). */
+    sourceClassName: z.string().optional(),
   }),
   z.object({
     type: z.literal("attribute"),

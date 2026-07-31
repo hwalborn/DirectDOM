@@ -23,6 +23,7 @@ const SKIP_DIRS = new Set([
   "build",
   ".git",
   "coverage",
+  "dibs-css",
 ]);
 const SOURCE_EXT = new Set([".tsx", ".ts", ".jsx", ".js"]);
 const SKIP_FILE_RE = /(?:\.(?:test|spec|stories)\.|_(?:test|spec)\.)/i;
@@ -597,13 +598,27 @@ export const findCandidateFiles = (
     ? resolveFerrumAppsFromPageUrl(repoPath, pageUrl)
     : { context: null, matches: [] };
 
-  const matchedApps = matches.map((m) => m.appName);
-  if (matchedApps.length > 0) {
+  const maxRouteScore = matches[0]?.score ?? 0;
+  const topRouteMatches =
+    maxRouteScore > 0
+      ? matches.filter((m) => m.score === maxRouteScore)
+      : [];
+  const matchedApps = topRouteMatches.map((m) => m.appName);
+
+  if (topRouteMatches.length > 0) {
     console.log(
-      `[codegen] pageUrl matched app(s): ${matches
-        .map((m) => `${m.appName} (route ${m.route})`)
+      `[codegen] pageUrl matched app(s): ${topRouteMatches
+        .map((m) => `${m.appName} (route ${m.route}, score=${m.score})`)
         .join(", ")}`,
     );
+    if (matches.length > topRouteMatches.length) {
+      console.log(
+        `[codegen] Ignored weaker route match(es): ${matches
+          .filter((m) => m.score < maxRouteScore)
+          .map((m) => `${m.appName} (${m.route})`)
+          .join(", ")}`,
+      );
+    }
   } else if (pageUrl) {
     console.log(
       `[codegen] No ferrum app route matched for pageUrl=${pageUrl}; using path segments only.`,

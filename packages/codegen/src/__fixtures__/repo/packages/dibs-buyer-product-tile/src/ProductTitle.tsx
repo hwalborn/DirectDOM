@@ -9,7 +9,7 @@ type Props = {
 export const ProductTitle: FC<Props> = ({ title }) => (
   <h2
     data-tn="product-title"
-    className={classNames(dibsCss.textSatan, dibsCss.truncate)}
+    className={classNames(dibsCss.textSatan, dibsCss.truncate, dibsCss.textBlue600)}
   >
     Vintage chair
   </h2>

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { inferCssRulesFromMessage } from "./infer-css-rules.js";
+import {
+  inferCssRulesFromMessage,
+  inferDibsCssClassNamesFromMessage,
+} from "./infer-css-rules.js";
 
 describe("inferCssRulesFromMessage", () => {
   it("extracts explicit CSS rules", () => {
@@ -8,9 +11,18 @@ describe("inferCssRulesFromMessage", () => {
     );
   });
 
-  it("maps named colors to dibs hex candidates", () => {
+  it("maps named colors to a single dibs hex candidate", () => {
     const rules = inferCssRulesFromMessage("change the color to blue");
-    expect(rules.some((rule) => rule.startsWith("color:"))).toBe(true);
+    expect(rules).toEqual(["color: #436b93"]);
+  });
+
+  it("extracts explicit dibs-css class names from the message", () => {
+    expect(inferDibsCssClassNamesFromMessage("apply textBlue600")).toEqual([
+      "textBlue600",
+    ]);
+    expect(
+      inferDibsCssClassNamesFromMessage("use dealer primary color"),
+    ).toEqual(["textDealerprimary"]);
   });
 
   it("maps layout intents", () => {

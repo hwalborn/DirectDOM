@@ -1,18 +1,39 @@
+/**
+ * Deterministic NL → CSS / dibs-class preprocessor — runs *before* MCP, not as a fallback.
+ *
+ * mcp-dibs-css translate_css needs concrete rules (`color: #436b93`), not English. This file
+ * extracts those from the user's message so generatePatch can call MCP and seed the LLM prompt.
+ *
+ * Two exports:
+ *   - inferCssRulesFromMessage()        → CSS rules for MCP translate_css
+ *   - inferDibsCssClassNamesFromMessage() → explicit utility keys (textBlue600, dealer primary)
+ *
+ * Actual fallbacks live elsewhere: MCP failure → empty translation; known classes →
+ * lookupDibsCssMatches() from @directdom/shared (reads ferrum's .d.ts directly).
+ */
 import type { ElementSnapshot } from "@directdom/shared";
+import { extractDibsCssClassNamesFromText } from "@directdom/shared";
 
 const EXPLICIT_CSS_PATTERN =
   /\b([a-z-]+)\s*:\s*([^;,\n]+?)(?=\s*(?:;|,|$|\band\b))/gi;
 
-const COLOR_NAME_TO_CSS: Record<string, string[]> = {
-  blue: ["color: #436b93", "color: #375d81", "color: #2683a3"],
-  "blue-500": ["color: #436b93"],
-  "blue-600": ["color: #436b93"],
-  red: ["color: #cc0000", "color: #950808"],
-  green: ["color: #2e7d32", "color: #1b5e20"],
-  gray: ["color: #444", "color: #555555", "color: #888888"],
-  grey: ["color: #444", "color: #555555", "color: #888888"],
-  black: ["color: #000", "color: #111"],
-  white: ["color: #fff", "color: #fbfbfb"],
+/** One canonical hex per named color — avoids flooding MCP with competing shades. */
+const COLOR_NAME_TO_CSS: Record<string, string> = {
+  blue: "color: #436b93",
+  "blue-500": "color: #436b93",
+  "blue-600": "color: #436b93",
+  "blue-700": "color: #375d81",
+  red: "color: #cc0000",
+  green: "color: #2e7d32",
+  gray: "color: #444444",
+  grey: "color: #444444",
+  black: "color: #000000",
+  white: "color: #ffffff",
+};
+
+const SEMANTIC_COLOR_CLASS: Record<string, { text: string; bg: string }> = {
+  "dealer primary": { text: "textDealerprimary", bg: "bgDealerprimary" },
+  "dealer secondary": { text: "textDealersecondary", bg: "bgDealersecondary" },
 };
 
 const addUnique = (rules: string[], rule: string): void => {
@@ -56,12 +77,11 @@ const extractColorRules = (message: string): string[] => {
   );
   const colorToken = named?.[2]?.toLowerCase();
   if (colorToken && COLOR_NAME_TO_CSS[colorToken]) {
-    for (const css of COLOR_NAME_TO_CSS[colorToken]) {
-      if (isBackground) {
-        addUnique(rules, css.replace(/^color:/, "background-color:"));
-      } else {
-        addUnique(rules, css);
-      }
+    const css = COLOR_NAME_TO_CSS[colorToken];
+    if (isBackground) {
+      addUnique(rules, css.replace(/^color:/, "background-color:"));
+    } else {
+      addUnique(rules, css);
     }
   }
 
@@ -127,9 +147,22 @@ const extractLayoutRules = (message: string): string[] => {
   return rules;
 };
 
+const extractSemanticColorClasses = (message: string): string[] => {
+  const classes: string[] = [];
+  const lower = message.toLowerCase();
+  const isBackground = /background/i.test(message);
+
+  for (const [phrase, mapping] of Object.entries(SEMANTIC_COLOR_CLASS)) {
+    if (!lower.includes(phrase)) continue;
+    addUnique(classes, isBackground ? mapping.bg : mapping.text);
+  }
+
+  return classes;
+};
+
 /**
  * Best-effort CSS rules for mcp-dibs-css translate_css.
- * Prefer explicit CSS / concrete values; named colors expand to known dibs hex candidates.
+ * Prefer explicit CSS / concrete values; named colors map to one canonical hex each.
  */
 export const inferCssRulesFromMessage = (
   message: string,
@@ -148,4 +181,18 @@ export const inferCssRulesFromMessage = (
   }
 
   return rules;
+};
+
+/** dibs-css keys mentioned directly or via semantic phrases (dealer primary, text-blue-600). */
+export const inferDibsCssClassNamesFromMessage = (
+  message: string,
+): string[] => {
+  const classes: string[] = [];
+  for (const className of extractDibsCssClassNamesFromText(message)) {
+    addUnique(classes, className);
+  }
+  for (const className of extractSemanticColorClasses(message)) {
+    addUnique(classes, className);
+  }
+  return classes;
 };

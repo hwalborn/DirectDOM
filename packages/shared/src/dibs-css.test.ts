@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  cssDeclarationToInlineStyle,
+  extractDibsCssClassNamesFromText,
   getDibsCssClassCategory,
   normalizeDibsCssClassNames,
+  rankClassNamesForMessage,
   resolveClassNameConflicts,
+  resolveClassNamesToAllowlist,
   stripDibsCssPrefix,
   toDibsCssDomClass,
 } from "./dibs-css.js";
@@ -37,5 +41,40 @@ describe("dibs-css helpers", () => {
         "dc-textBlue600",
       ),
     ).toBe("dc-flex dc-p4 dc-textBlue600");
+  });
+
+  it("extracts explicit dibs-css class names from text", () => {
+    expect(extractDibsCssClassNamesFromText("use dc-textBlue600")).toEqual([
+      "textBlue600",
+    ]);
+    expect(extractDibsCssClassNamesFromText("change to text-blue-700")).toEqual(
+      ["textBlue700"],
+    );
+  });
+
+  it("ranks MCP matches using message context", () => {
+    const ranked = rankClassNamesForMessage("use dealer primary color", [
+      "textBlue600",
+      "textDealerprimary",
+    ]);
+    expect(ranked[0]).toBe("textDealerprimary");
+  });
+
+  it("parses MCP CSS declarations into inline style records", () => {
+    expect(cssDeclarationToInlineStyle("color: #436b93")).toEqual({
+      color: "#436b93",
+    });
+    expect(cssDeclarationToInlineStyle("background-color: #fff")).toEqual({
+      backgroundColor: "#fff",
+    });
+  });
+
+  it("does not guess an unrelated class when shade is missing from allowlist", () => {
+    const result = resolveClassNamesToAllowlist("textBlue500", [
+      "textBlue600",
+      "textBlue700",
+    ]);
+    expect(result.unresolved).toContain("textBlue500");
+    expect(result.resolved).toBe("");
   });
 });

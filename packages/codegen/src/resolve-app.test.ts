@@ -58,4 +58,15 @@ describe("resolveFerrumAppsFromPageUrl", () => {
     expect(matches[0]?.appName).toBe("app-dealer-tools");
     expect(matches.some((m) => m.appName.startsWith("app-buyer-"))).toBe(false);
   });
+
+  it("matches app-admin-inventory for /dealers/inventory-management on adminv2", () => {
+    const { matches, context } = resolveFerrumAppsFromPageUrl(
+      FIXTURE_REPO,
+      "https://adminv2.qa.1stdibs.com/dealers/inventory-management",
+    );
+    expect(context?.hostFamily).toBe("dealer");
+    expect(matches[0]?.appName).toBe("app-admin-inventory");
+    expect(matches[0]?.route).toBe("/dealers/inventory-management");
+    expect(matches[0]?.score).toBeGreaterThan(matches[1]?.score ?? 0);
+  });
 });

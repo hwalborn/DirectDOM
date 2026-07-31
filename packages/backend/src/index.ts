@@ -18,7 +18,7 @@ import {
 } from "./store/session-store.js";
 import { attachMetadata, startSubmitJobAsync } from "./services/submit-job.js";
 import { getRegistry } from "./services/registry.js";
-import { closeDibsCssMcp } from "./services/dibs-css-mcp.js";
+import { closeDibsCssMcp, checkDibsCssMcpHealth } from "./services/dibs-css-mcp.js";
 
 const app = Fastify({ logger: true });
 
@@ -26,6 +26,8 @@ await app.register(cors, { origin: true });
 await app.register(websocket);
 
 app.get("/health", async () => ({ status: "ok" }));
+
+app.get("/health/mcp", async () => checkDibsCssMcpHealth());
 
 app.get("/registry", async () => getRegistry());
 
@@ -163,6 +165,16 @@ const start = async (): Promise<void> => {
       `DirectDOM backend listening on http://localhost:${config.port}`,
     );
     console.log(`mcp-dibs-css ferrum root: ${config.ferrumRoot}`);
+
+    const mcpHealth = await checkDibsCssMcpHealth();
+    if (mcpHealth.ok) {
+      console.log(`[dibs-css-mcp] ${mcpHealth.message}`);
+    } else {
+      console.warn(`[dibs-css-mcp] NOT CONNECTED: ${mcpHealth.message}`);
+      console.warn(
+        `[dibs-css-mcp] Set FERRUM_ROOT in .env if ferrum is not at ${config.ferrumRoot}`,
+      );
+    }
   } catch (err) {
     app.log.error(err);
     process.exit(1);

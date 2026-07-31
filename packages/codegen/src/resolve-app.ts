@@ -177,23 +177,12 @@ const listAppNames = (repoPath: string): string[] => {
   }
 };
 
-const appMatchesHostFamily = (
-  appName: string,
-  hostFamily: PageUrlContext["hostFamily"],
-): boolean => {
-  if (hostFamily === "unknown") return true;
-  if (hostFamily === "admin") {
-    return appName.startsWith("app-admin-");
-  }
-  if (hostFamily === "dealer") {
-    return appName.startsWith("app-dealer-");
-  }
-  return appName.startsWith("app-buyer-");
-};
-
 /**
  * Infer which ferrum app(s) own a page by matching pathname against
  * route declarations under each app's src/server directory.
+ *
+ * Scans every ferrum app — not host-family subsets — because admin surfaces
+ * (e.g. app-admin-inventory) own many `/dealers/*` routes on adminv2.
  */
 export const resolveFerrumAppsFromPageUrl = (
   repoPath: string,
@@ -207,8 +196,6 @@ export const resolveFerrumAppsFromPageUrl = (
   const matches: FerrumAppMatch[] = [];
 
   for (const appName of listAppNames(repoPath)) {
-    if (!appMatchesHostFamily(appName, context.hostFamily)) continue;
-
     const serverDir = join(repoPath, "apps", appName, "src", "server");
     if (!existsSync(serverDir)) continue;
 

@@ -7,21 +7,44 @@ import {
   normalizeDibsCssClassNames,
   parseDomPatch,
   resolveClassNamesToAllowlist,
+  stripDibsCssPrefix,
   toDibsCssDomClass,
+  lookupDibsCssMatches,
 } from "@directdom/shared";
 import { completeJson } from "@directdom/shared/llm";
-import { getLlmConfig, useMockLlm } from "../config.js";
+import { config, getLlmConfig, useMockLlm } from "../config.js";
 import {
-  collectMatchedClassNames,
+  findMcpMatchForClass,
   formatTranslationForPrompt,
+  matchesToInlineStylePatch,
+  pickRelevantClassNames,
+  pickRelevantMcpMatches,
+  resolveDibsCssMatches,
   translateCss,
+  type DibsCssMatch,
   type DibsCssTranslationSummary,
 } from "./dibs-css-mcp.js";
-import { inferCssRulesFromMessage } from "./infer-css-rules.js";
+import {
+  inferCssRulesFromMessage,
+  inferDibsCssClassNamesFromMessage,
+} from "./infer-css-rules.js";
 import { getRegistry } from "./registry.js";
 
 const HEX_COLOR_PATTERN = /#[0-9a-fA-F]{3,8}\b/;
 const RGB_COLOR_PATTERN = /rgba?\([^)]+\)/i;
+
+const extractSourceClassNamesFromPatch = (patch: DomPatch): string[] => {
+  if (patch.type === "inlineStyle" && patch.sourceClassName) {
+    return [patch.sourceClassName];
+  }
+  if (patch.type === "className") {
+    return patch.value
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(stripDibsCssPrefix);
+  }
+  return [];
+};
 
 /** Mock-mode named color → dibs-css key when MCP is unavailable. */
 const MOCK_COLOR_CLASS_FALLBACKS: Record<string, string> = {
@@ -93,8 +116,11 @@ export const inferRequestCategory = (message: string): RequestCategory => {
   if (isRestructureIntent(message)) return "structural-restructure";
   if (isNewElementIntent(message)) return "structural-add";
   if (isStructuralIntent(message)) return "structural-add";
+  if (inferDibsCssClassNamesFromMessage(message).length > 0) {
+    return "styling";
+  }
   if (
-    /\b(color|font|bold|italic|underline|background|padding|margin|align|size|spacing|border|rounded|shadow|opacity|visible|hidden|width|height)\b/i.test(
+    /\b(color|font|bold|italic|underline|background|padding|margin|align|size|spacing|border|rounded|shadow|opacity|visible|hidden|width|height|dealer\s+primary|primary\s+blue)\b/i.test(
       message,
     )
   ) {
@@ -172,10 +198,92 @@ const extractNewLabel = (message: string): string | null => {
   return labelMatch?.[1]?.trim().replace(/^["']|["']$/g, "") ?? null;
 };
 
+type McpStyleContext = {
+  classNames: string[];
+  translation: DibsCssTranslationSummary | null;
+};
+
+const collectMcpMatchesForClassNamePatch = (
+  classNamePatch: Extract<DomPatch, { type: "className" }>,
+  message: string,
+  context: McpStyleContext,
+): DibsCssMatch[] => {
+  const matches: DibsCssMatch[] = [];
+  const seen = new Set<string>();
+
+  const addMatch = (match: DibsCssMatch | null): void => {
+    if (!match || seen.has(match.className)) return;
+    seen.add(match.className);
+    matches.push(match);
+  };
+
+  for (const match of pickRelevantMcpMatches(
+    message,
+    context.translation,
+    context.classNames,
+  )) {
+    addMatch(match);
+  }
+
+  for (const token of classNamePatch.value.split(/\s+/).filter(Boolean)) {
+    addMatch(findMcpMatchForClass(context.translation, stripDibsCssPrefix(token)));
+  }
+
+  return matches;
+};
+
+const classNamePatchToMcpInlineStyle = (
+  classNamePatch: Extract<DomPatch, { type: "className" }>,
+  message: string,
+  context: McpStyleContext,
+): Extract<DomPatch, { type: "inlineStyle" }> | null => {
+  const matches = collectMcpMatchesForClassNamePatch(
+    classNamePatch,
+    message,
+    context,
+  );
+
+  return matchesToInlineStylePatch(matches, {
+    mode: classNamePatch.mode ?? "merge",
+    sourceClassName: matches[0]?.className ?? context.classNames[0],
+  });
+};
+
+const finalizeStylingPatch = (
+  patch: DomPatch,
+  effectiveMessage: string,
+  mcpContext: McpStyleContext,
+  explicitClassNames: string[],
+): DomPatch => {
+  const isStyling =
+    patch.type === "className" ||
+    patch.type === "inlineStyle" ||
+    inferRequestCategory(effectiveMessage) === "styling";
+
+  if (!isStyling) return patch;
+
+  const classNames = new Set<string>([
+    ...explicitClassNames,
+    ...mcpContext.classNames,
+    ...extractSourceClassNamesFromPatch(patch),
+  ]);
+
+  const matches = resolveDibsCssMatches(
+    effectiveMessage,
+    mcpContext.translation,
+    [...classNames],
+  );
+  const inlinePatch = matchesToInlineStylePatch(matches, {
+    mode: patch.type === "inlineStyle" ? patch.mode : "merge",
+  });
+
+  return inlinePatch ?? patch;
+};
+
 const refinePatch = (
   patch: DomPatch,
   message: string,
-  mcpClassNames: string[] = [],
+  mcpContext: McpStyleContext = { classNames: [], translation: null },
 ): DomPatch => {
   if (isDuplicateIntent(message)) {
     if (patch.type === "textContent") {
@@ -226,8 +334,16 @@ const refinePatch = (
   }
 
   if (patch.type !== "className") {
-    return patch;
+    return finalizeStylingPatch(
+      patch,
+      message,
+      mcpContext,
+      [],
+    );
   }
+
+  const mcpClassNames = mcpContext.classNames;
+  let classNamePatch: Extract<DomPatch, { type: "className" }> = patch;
 
   if (mcpClassNames.length > 0) {
     const { resolved, unresolved } = resolveClassNamesToAllowlist(
@@ -236,31 +352,47 @@ const refinePatch = (
     );
 
     if (unresolved.length === 0) {
-      return {
+      classNamePatch = {
         ...patch,
         value: resolved,
         mode: patch.mode ?? "merge",
       };
+    } else {
+      const preferred = mcpClassNames[0];
+      if (
+        preferred &&
+        unresolved.length === patch.value.split(/\s+/).filter(Boolean).length
+      ) {
+        classNamePatch = {
+          ...patch,
+          value: toDibsCssDomClass(preferred),
+          mode: patch.mode ?? "merge",
+        };
+      } else {
+        classNamePatch = {
+          ...patch,
+          value: resolved || normalizeDibsCssClassNames(patch.value),
+          mode: patch.mode ?? "merge",
+        };
+      }
     }
-
-    const preferred = mcpClassNames[0];
-    if (preferred && unresolved.length === patch.value.split(/\s+/).filter(Boolean).length) {
-      return {
-        ...patch,
-        value: toDibsCssDomClass(preferred),
-        mode: patch.mode ?? "merge",
-      };
-    }
-
-    return {
+  } else {
+    classNamePatch = {
       ...patch,
-      value: resolved || normalizeDibsCssClassNames(patch.value),
+      value: normalizeDibsCssClassNames(patch.value),
       mode: patch.mode ?? "merge",
     };
   }
 
+  const inlinePatch = classNamePatchToMcpInlineStyle(
+    classNamePatch,
+    message,
+    mcpContext,
+  );
+  if (inlinePatch) return inlinePatch;
+
   const inlineStyle: Record<string, string> = {};
-  for (const token of patch.value.split(/\s+/).filter(Boolean)) {
+  for (const token of classNamePatch.value.split(/\s+/).filter(Boolean)) {
     const stripped = token.replace(/^dc-/, "");
     if (HEX_COLOR_PATTERN.test(stripped) || RGB_COLOR_PATTERN.test(stripped)) {
       if (/background/i.test(message)) {
@@ -279,11 +411,12 @@ const refinePatch = (
     };
   }
 
-  return {
-    ...patch,
-    value: normalizeDibsCssClassNames(patch.value),
-    mode: patch.mode ?? "merge",
-  };
+  return finalizeStylingPatch(
+    classNamePatch,
+    message,
+    mcpContext,
+    [],
+  );
 };
 
 const extractQuotedValue = (message: string): string | null => {
@@ -373,9 +506,10 @@ const buildSystemPrompt = (params: {
   message: string;
   elementSnapshot?: ElementSnapshot;
   translation: DibsCssTranslationSummary | null;
+  mcpClassNames: string[];
 }): string => {
   const registry = getRegistry();
-  const mcpClassNames = collectMatchedClassNames(params.translation);
+  const mcpClassNames = params.mcpClassNames;
   const classHint =
     mcpClassNames.length > 0
       ? mcpClassNames.map(toDibsCssDomClass).join(", ")
@@ -456,11 +590,11 @@ STRUCTURAL EXAMPLES:
 { "reply": "Split into two columns.", "patch": { "type": "swapElement", "componentName": "div", "html": "<div class=\\"dc-flex dc-flexRow dc-gapMedium\\"><div class=\\"dc-flex1\\">...</div><div class=\\"dc-flex1\\">...</div></div>" } }
 
 STYLING RULES (critical):
-1. Prefer dibs-css classes from the MCP matches below — pick the CLOSEST matching key, never invent tailwind-style names like text-blue-500.
-2. For className patches, ALWAYS use mode "merge". The system removes conflicting classes in the same category (e.g. replacing textGray800 when adding textBlue600).
-3. If the user requests an exact color (hex like #ff0000, rgb(), or a value with no matching dibs-css class), use inlineStyle instead:
+1. Prefer dibs-css classes from the MCP matches below. Return inlineStyle patches using the MCP CSS values (never className) — DirectDOM applies these on the element's style attribute so they override existing classes.
+2. Example: { "type": "inlineStyle", "value": { "color": "#436b93" }, "mode": "merge", "sourceClassName": "textBlue600" }
+3. If the user requests an exact color with no matching dibs-css class, use inlineStyle without sourceClassName:
    { "type": "inlineStyle", "value": { "color": "#ff0000" }, "mode": "merge" }
-4. Do NOT use raw Tailwind classes. Map to dibs-css keys: text-blue-500 -> textBlue500 or the closest available text* class.
+4. Do NOT use raw Tailwind classes or className patches for styling.
 5. Element currently has classes: ${currentClasses}
 ${styleContext}
 
@@ -469,13 +603,21 @@ ${translationHint}
 
 CONTENT & STYLING EXAMPLES:
 { "reply": "Updated the button label.", "patch": { "type": "textContent", "value": "Submit order" } }
-{ "reply": "Applied blue text.", "patch": { "type": "className", "value": "dc-textBlue600", "mode": "merge" } }
+{ "reply": "Applied blue text.", "patch": { "type": "inlineStyle", "value": { "color": "#436b93" }, "mode": "merge", "sourceClassName": "textBlue600" } }
 { "reply": "Applied custom red.", "patch": { "type": "inlineStyle", "value": { "color": "#e63946" }, "mode": "merge" } }
 { "reply": "Updated the link.", "patch": { "type": "attribute", "name": "href", "value": "https://example.com" } }
 { "reply": "Swapped to the design-system button.", "patch": { "type": "swapElement", "componentName": "Button", "props": { "variant": "primary" }, "html": "<button type=\\"button\\" class=\\"dc-textBlue600 dc-pSmall\\">Submit</button>" } }
 { "reply": "Select an element first.", "patch": null }
 
 Relevant dibs-css classes for this request: ${classHint}`;
+};
+
+const EMPTY_TRANSLATION: DibsCssTranslationSummary = {
+  totalQueries: 0,
+  found: 0,
+  notFound: 0,
+  invalid: 0,
+  results: [],
 };
 
 export const generatePatch = async (params: {
@@ -485,10 +627,22 @@ export const generatePatch = async (params: {
   ledger: ChangeRecord[];
 }): Promise<{ reply: string; patch?: DomPatch }> => {
   const { message, elementSnapshot, selectedSelector, ledger } = params;
+  const explicitClassNames = inferDibsCssClassNamesFromMessage(message);
 
   const cssRules = inferCssRulesFromMessage(message, elementSnapshot);
-  const translation = await translateCss(cssRules);
-  const mcpClassNames = collectMatchedClassNames(translation);
+  const translation =
+    cssRules.length > 0
+      ? (await translateCss(cssRules)) ?? EMPTY_TRANSLATION
+      : EMPTY_TRANSLATION;
+  const mcpClassNames = pickRelevantClassNames(
+    message,
+    translation,
+    explicitClassNames,
+  );
+  const mcpContext: McpStyleContext = {
+    classNames: mcpClassNames,
+    translation,
+  };
 
   if (useMockLlm) {
     if (!selectedSelector) {
@@ -498,19 +652,26 @@ export const generatePatch = async (params: {
       };
     }
 
-    if (mcpClassNames.length > 0 && inferRequestCategory(message) === "styling") {
-      const preferred = mcpClassNames.find((name) =>
-        name.toLowerCase().startsWith("text"),
-      ) ?? mcpClassNames[0];
+    if (
+      (mcpClassNames.length > 0 || explicitClassNames.length > 0) &&
+      inferRequestCategory(message) === "styling"
+    ) {
+      const matches =
+        explicitClassNames.length > 0 && mcpClassNames.length === 0
+          ? lookupDibsCssMatches(config.ferrumRoot, explicitClassNames)
+          : pickRelevantMcpMatches(
+              message,
+              translation,
+              explicitClassNames,
+            );
+      const inlinePatch = matchesToInlineStylePatch(matches);
 
-      return {
-        reply: `Applied className change to ${selectedSelector}.`,
-        patch: {
-          type: "className",
-          value: toDibsCssDomClass(preferred),
-          mode: "merge",
-        },
-      };
+      if (inlinePatch) {
+        return {
+          reply: `Applied inline style to ${selectedSelector}.`,
+          patch: inlinePatch,
+        };
+      }
     }
 
     const patch = parsePatchFromMessage(message);
@@ -529,14 +690,24 @@ export const generatePatch = async (params: {
 
     return {
       reply: `Applied ${validated.data.type} change to ${selectedSelector}.`,
-      patch: refinePatch(validated.data, message, mcpClassNames),
+      patch: finalizeStylingPatch(
+        refinePatch(validated.data, message, mcpContext),
+        message,
+        mcpContext,
+        explicitClassNames,
+      ),
     };
   }
 
   const llmConfig = getLlmConfig();
 
   const content = await completeJson(llmConfig, {
-    system: buildSystemPrompt({ message, elementSnapshot, translation }),
+    system: buildSystemPrompt({
+      message,
+      elementSnapshot,
+      translation,
+      mcpClassNames,
+    }),
     user: JSON.stringify({
       message,
       selectedSelector,
@@ -567,7 +738,12 @@ export const generatePatch = async (params: {
 
   return {
     reply: parsed.reply ?? `Applied ${validated.data.type} change.`,
-    patch: refinePatch(validated.data, message, mcpClassNames),
+    patch: finalizeStylingPatch(
+      refinePatch(validated.data, message, mcpContext),
+      message,
+      mcpContext,
+      explicitClassNames,
+    ),
   };
 };
 

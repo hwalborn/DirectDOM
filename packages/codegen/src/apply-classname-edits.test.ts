@@ -35,6 +35,30 @@ describe("planClassNameTokenSwaps", () => {
         after: { tagName: "H2", className: "dc-textBlue600 dc-truncate" },
         patch: { type: "className", value: "dc-textBlue600", mode: "merge" },
       }),
+      FIXTURE_REPO,
+    );
+
+    expect(swaps).toEqual([{ from: "textSatan", to: "textBlue600" }]);
+  });
+
+  it("maps inlineStyle preview patches via sourceClassName", () => {
+    const swaps = planClassNameTokenSwaps(
+      baseRecord({
+        target: {
+          selector: "h2",
+          reactFiberHint: "ProductTitle",
+          boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        before: { tagName: "H2", className: "dc-textSatan dc-truncate" },
+        after: { tagName: "H2", className: "dc-textSatan dc-truncate" },
+        patch: {
+          type: "inlineStyle",
+          value: { color: "#436b93" },
+          mode: "merge",
+          sourceClassName: "textBlue600",
+        },
+      }),
+      FIXTURE_REPO,
     );
 
     expect(swaps).toEqual([{ from: "textSatan", to: "textBlue600" }]);
