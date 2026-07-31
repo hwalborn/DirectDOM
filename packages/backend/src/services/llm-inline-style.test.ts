@@ -2,9 +2,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
-  lookupDibsCssMatches,
   mergeCssDeclarationsToInlineStyle,
 } from "@directdom/shared";
+import { lookupDibsCssMatches } from "@directdom/shared/dibs-css-lookup";
 
 const FIXTURE_REPO = join(
   dirname(fileURLToPath(import.meta.url)),

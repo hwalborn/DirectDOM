@@ -13,6 +13,10 @@
     "./llm": {
       "types": "./dist/llm/index.d.ts",
       "import": "./dist/llm/index.js"
+    },
+    "./dibs-css-lookup": {
+      "types": "./dist/dibs-css-lookup.d.ts",
+      "import": "./dist/dibs-css-lookup.js"
     }
   },
   "scripts": {

@@ -9,8 +9,8 @@ import {
   resolveClassNamesToAllowlist,
   stripDibsCssPrefix,
   toDibsCssDomClass,
-  lookupDibsCssMatches,
 } from "@directdom/shared";
+import { lookupDibsCssMatches } from "@directdom/shared/dibs-css-lookup";
 import { completeJson } from "@directdom/shared/llm";
 import { config, getLlmConfig, useMockLlm } from "../config.js";
 import {

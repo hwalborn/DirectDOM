@@ -14,12 +14,13 @@
  *
  * MCP is spawned as a long-lived stdio subprocess from ferrumRoot (see FERRUM_ROOT).
  * If MCP is down or the user already named a class (`textBlue600`), we fall back to
- * lookupDibsCssMatches() from @directdom/shared (same .d.ts file, no subprocess).
+ * lookupDibsCssMatches() from @directdom/shared/dibs-css-lookup (same .d.ts file, no subprocess).
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { DomPatch } from "@directdom/shared";
-import { rankClassNamesForMessage, mergeCssDeclarationsToInlineStyle, lookupDibsCssMatches, type DibsCssMatch } from "@directdom/shared";
+import { rankClassNamesForMessage, mergeCssDeclarationsToInlineStyle } from "@directdom/shared";
+import { lookupDibsCssMatches, type DibsCssMatch } from "@directdom/shared/dibs-css-lookup";
 import { config } from "../config.js";
 
 export type { DibsCssMatch };

@@ -3,9 +3,11 @@ import {
   getDibsCssClassCategory,
   inlineStyleRecordToCssDeclarations,
   stripDibsCssPrefix,
+} from "@directdom/shared";
+import {
   lookupDibsCssClassesByDeclarations,
   lookupDibsCssMatches,
-} from "@directdom/shared";
+} from "@directdom/shared/dibs-css-lookup";
 
 export type StyleEditPlan = {
   incomingClasses: string[];

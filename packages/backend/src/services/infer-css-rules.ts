@@ -9,7 +9,7 @@
  *   - inferDibsCssClassNamesFromMessage() → explicit utility keys (textBlue600, dealer primary)
  *
  * Actual fallbacks live elsewhere: MCP failure → empty translation; known classes →
- * lookupDibsCssMatches() from @directdom/shared (reads ferrum's .d.ts directly).
+ * lookupDibsCssMatches() from @directdom/shared/dibs-css-lookup (reads ferrum's .d.ts directly).
  */
 import type { ElementSnapshot } from "@directdom/shared";
 import { extractDibsCssClassNamesFromText } from "@directdom/shared";
