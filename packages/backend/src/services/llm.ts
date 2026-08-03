@@ -507,6 +507,7 @@ const buildSystemPrompt = (params: {
   elementSnapshot?: ElementSnapshot;
   translation: DibsCssTranslationSummary | null;
   mcpClassNames: string[];
+  priorChangesForTarget?: ChangeRecord[];
 }): string => {
   const registry = getRegistry();
   const mcpClassNames = params.mcpClassNames;
@@ -530,6 +531,16 @@ const buildSystemPrompt = (params: {
   const structuralContext = buildStructuralContext(params.elementSnapshot);
   const requestCategory = inferRequestCategory(params.message);
   const categoryHint = REQUEST_CATEGORY_HINTS[requestCategory];
+  const priorChangesHint =
+    params.priorChangesForTarget && params.priorChangesForTarget.length > 0
+      ? `Prior edits on this same element (already applied in the live DOM — build on top of these, do not repeat them):
+${params.priorChangesForTarget
+  .map(
+    (change) =>
+      `- intent: "${change.intent}" | patch: ${JSON.stringify(change.patch)} | after classes: ${change.after.className ?? "none"}`,
+  )
+  .join("\n")}`
+      : "";
 
   const componentNames = registry.components.map((c) => c.name).join(", ");
 
@@ -580,7 +591,7 @@ D. Design-system component swap:
 ELEMENT CONTEXT:
 ${structuralContext || "No element selected — ask user to select an element first."}
 ${currentHtml}
-
+${priorChangesHint ? `\n${priorChangesHint}\n` : ""}
 STRUCTURAL EXAMPLES:
 { "reply": "Duplicated the dropdown below the original.", "patch": { "type": "insertElement", "position": "after", "mode": "clone" } }
 { "reply": "Duplicated with a new label.", "patch": { "type": "insertElement", "position": "after", "mode": "clone", "textContent": "Sort by price" } }
@@ -700,6 +711,9 @@ export const generatePatch = async (params: {
   }
 
   const llmConfig = getLlmConfig();
+  const priorChangesForTarget = selectedSelector
+    ? ledger.filter((entry) => entry.target.selector === selectedSelector)
+    : [];
 
   const content = await completeJson(llmConfig, {
     system: buildSystemPrompt({
@@ -707,12 +721,14 @@ export const generatePatch = async (params: {
       elementSnapshot,
       translation,
       mcpClassNames,
+      priorChangesForTarget,
     }),
     user: JSON.stringify({
       message,
       selectedSelector,
       elementSnapshot,
       priorChanges: ledger.length,
+      priorChangesForTarget,
       mcpCssRules: cssRules,
     }),
   });

@@ -19,10 +19,19 @@ import {
 } from "./component-style-context.js";
 import { findCandidateFiles } from "./find-candidates.js";
 import {
+  applyInlineStyleToJsxContent,
+} from "./apply-inline-style-to-jsx.js";
+import { findTargetJsxStartLine } from "./jsx-source-location.js";
+import {
   findSwappableBeforeToken,
   pickPrimaryIncomingClass,
   resolveStyleEditPlan,
 } from "./resolve-styling-patch.js";
+
+export type StylingEditResult = {
+  modifiedPaths: string[];
+  appliedChangeIds: string[];
+};
 
 export type ClassNameTokenSwap = {
   from: string;
@@ -264,16 +273,19 @@ const shouldPreferModuleCss = (
 };
 
 /**
- * Apply styling ledger changes to ferrum source: dibsCss token swaps/additions
- * and/or CSS module property updates when a .module.css file controls the style.
+ * Apply styling ledger changes to ferrum source: dibsCss token swaps/additions,
+ * CSS module property updates when a .module.css file controls the style, or
+ * inline style={{ ... }} on the JSX element when no dibs-css class applies.
  */
 export const applyStylingEdits = (
   repoPath: string,
   ledger: ChangeRecord[],
   pageUrl?: string,
-): string[] => {
+): StylingEditResult => {
   const stylingChanges = ledger.filter(isStylingChange);
-  if (stylingChanges.length === 0) return [];
+  if (stylingChanges.length === 0) {
+    return { modifiedPaths: [], appliedChangeIds: [] };
+  }
 
   const candidates = findCandidateFiles(repoPath, stylingChanges, {
     pageUrl,
@@ -282,7 +294,7 @@ export const applyStylingEdits = (
 
   if (candidates.length === 0) {
     console.warn("[codegen] applyStylingEdits: no candidates");
-    return [];
+    return { modifiedPaths: [], appliedChangeIds: [] };
   }
 
   console.log(
@@ -292,6 +304,7 @@ export const applyStylingEdits = (
   );
 
   const modified = new Set<string>();
+  const appliedChangeIds: string[] = [];
 
   for (const change of stylingChanges) {
     const plan = resolveStyleEditPlan(change, repoPath);
@@ -299,6 +312,8 @@ export const applyStylingEdits = (
 
     const swaps = planTokenSwaps(change, repoPath);
     const additions = planClassAdditions(change, repoPath);
+    const isCustomInlinePatch =
+      change.patch.type === "inlineStyle" && !change.patch.sourceClassName;
     let applied = false;
 
     for (const candidate of candidates) {
@@ -310,11 +325,36 @@ export const applyStylingEdits = (
         continue;
       }
 
+      if (!findTargetJsxStartLine(content, change, candidate.path)) {
+        continue;
+      }
+
       const context = detectComponentStyleContext(
         repoPath,
         candidate.path,
         content,
       );
+
+      if (isCustomInlinePatch) {
+        const inlineStyled = applyInlineStyleToJsxContent(
+          content,
+          change,
+          candidate.path,
+          plan.inlineDeclarations,
+        );
+        if (inlineStyled.replacements > 0) {
+          writeFileSync(absPath, inlineStyled.content, "utf-8");
+          modified.add(absPath);
+          applied = true;
+          console.log(
+            `[codegen] applyStylingEdits: added inline style in ${candidate.path} (${Object.entries(plan.inlineDeclarations)
+              .map(([property, value]) => `${property}: ${value}`)
+              .join(", ")})`,
+          );
+        }
+        if (applied) break;
+        continue;
+      }
 
       if (
         shouldPreferModuleCss(context, content, plan, change) &&
@@ -383,6 +423,7 @@ export const applyStylingEdits = (
 
       if (
         !applied &&
+        !isCustomInlinePatch &&
         context.cssModules.length > 0 &&
         Object.keys(plan.inlineDeclarations).length > 0
       ) {
@@ -402,14 +443,19 @@ export const applyStylingEdits = (
       if (applied) break;
     }
 
-    if (!applied) {
+    if (applied) {
+      appliedChangeIds.push(change.id);
+    } else {
       console.warn(
         `[codegen] applyStylingEdits: could not apply intent="${change.intent}"`,
       );
     }
   }
 
-  return [...modified];
+  return {
+    modifiedPaths: [...modified],
+    appliedChangeIds,
+  };
 };
 
 /** @deprecated Use applyStylingEdits */

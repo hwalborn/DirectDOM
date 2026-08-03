@@ -1,118 +1,19 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename, extname, join } from "node:path";
+import { join } from "node:path";
 import type { ChangeRecord } from "@directdom/shared";
 import { stripDibsCssPrefix } from "@directdom/shared";
 import { detectComponentStyleContext } from "./component-style-context.js";
+import { findCandidateFiles } from "./find-candidates.js";
 import {
-  findCandidateFiles,
-  matchDataTnInSource,
-  normalizeTnValue,
-} from "./find-candidates.js";
+  collectDataTnValuesFromSelector,
+  findJsxElementEndLine,
+  findJsxElementStartLine,
+  parseFiberHints,
+} from "./jsx-source-location.js";
 
 export type StructuralEditResult = {
   modifiedPaths: string[];
   appliedChangeIds: string[];
-};
-
-const parseFiberHints = (raw: string | undefined): string[] => {
-  if (!raw?.trim()) return [];
-  return raw
-    .split(/[|>]/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .filter((name) => !/^[a-z]/.test(name))
-    .filter((name) => !/^(ForwardRef|Memo|Anonymous|Fragment)\b/.test(name));
-};
-
-/** Last line index (inclusive) of a JSX element starting at `startLine`. */
-export const findJsxElementEndLine = (
-  lines: string[],
-  startLine: number,
-): number => {
-  const opening = lines[startLine] ?? "";
-  const trimmed = opening.trim();
-
-  if (/<[A-Za-z][^>]*\/>\s*$/.test(trimmed)) {
-    return startLine;
-  }
-
-  const pascalMatch = opening.match(/<([A-Z][A-Za-z0-9]*)/);
-  if (pascalMatch) {
-    const name = pascalMatch[1];
-    for (let i = startLine; i < lines.length; i++) {
-      if (lines[i].includes(`</${name}>`)) return i;
-      if (i > startLine && new RegExp(`<${name}\\b[^>]*\\/>`).test(lines[i])) {
-        return i;
-      }
-    }
-    return startLine;
-  }
-
-  const htmlMatch = opening.match(/<([a-z][a-z0-9]*)/);
-  if (htmlMatch) {
-    const tag = htmlMatch[1];
-    let depth = 0;
-    for (let i = startLine; i < lines.length; i++) {
-      const line = lines[i];
-      const openCount =
-        line.match(new RegExp(`<${tag}(?:\\s|>|/)`, "g"))?.length ?? 0;
-      const closeCount =
-        (line.match(new RegExp(`</${tag}>`, "g"))?.length ?? 0) +
-        (line.match(new RegExp(`<${tag}[^>]*/>`, "g"))?.length ?? 0);
-      if (openCount > 0) depth += openCount;
-      if (closeCount > 0) depth -= closeCount;
-      if (depth <= 0 && i >= startLine) return i;
-    }
-  }
-
-  return startLine;
-};
-
-const findLineWithDataTn = (lines: string[], value: string): number | null => {
-  const normValue = normalizeTnValue(value);
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (
-      line.includes(`data-tn="${value}"`) ||
-      line.includes(`dataTn="${value}"`) ||
-      line.includes(`data-tn='${value}'`)
-    ) {
-      return i;
-    }
-    const chunk = lines.slice(Math.max(0, i - 2), i + 3).join("\n");
-    if (matchDataTnInSource(chunk, { name: "data-tn", value })) {
-      return i;
-    }
-    if (normValue.length >= 4 && normalizeTnValue(line).includes(normValue)) {
-      return i;
-    }
-  }
-  return null;
-};
-
-const findLineWithUniqueText = (
-  lines: string[],
-  text: string,
-): number | null => {
-  const trimmed = text.trim();
-  if (trimmed.length < 4) return null;
-
-  const hits: number[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes(trimmed)) hits.push(i);
-  }
-  return hits.length === 1 ? hits[0] : null;
-};
-
-const findLineWithFiberComponent = (
-  lines: string[],
-  componentName: string,
-): number | null => {
-  const re = new RegExp(`<${componentName}\\b`);
-  for (let i = 0; i < lines.length; i++) {
-    if (re.test(lines[i])) return i;
-  }
-  return null;
 };
 
 export type AnchorInsertPoint = {
@@ -130,57 +31,52 @@ export const findAnchorInsertLine = (
 
   const lines = content.split("\n");
   const position = change.patch.position;
-  const fileStem = basename(relativePath, extname(relativePath));
 
-  const dataTnValues = new Set<string>();
-  const anchorSelector = change.anchor?.selector ?? "";
-  for (const match of anchorSelector.matchAll(
-    /\[(?:data-tn|data-testid)=["']([^"']+)["']\]/gi,
-  )) {
-    if (match[1]) dataTnValues.add(match[1]);
-  }
-  for (const key of ["data-tn", "data-testid"] as const) {
-    const val = change.before.attributes?.[key];
-    if (val) dataTnValues.add(val);
-  }
+  const anchorDataTnValues = collectDataTnValuesFromSelector(
+    change.anchor?.selector ?? "",
+    change.before.attributes,
+  );
 
-  for (const value of dataTnValues) {
-    const line = findLineWithDataTn(lines, value);
-    if (line !== null) {
-      const endLine = findJsxElementEndLine(lines, line);
-      return {
-        insertAtLine:
-          position === "before"
-            ? line
-            : position === "inside"
-              ? line + 1
-              : endLine + 1,
-        reason: `data-tn=${value}`,
-      };
-    }
+  for (const value of anchorDataTnValues) {
+    const line = findJsxElementStartLine(lines, relativePath, {
+      dataTnValues: [value],
+      dataTnMatch: "fuzzy",
+    });
+    if (line === null) continue;
+
+    const endLine = findJsxElementEndLine(lines, line);
+    return {
+      insertAtLine:
+        position === "before"
+          ? line
+          : position === "inside"
+            ? line + 1
+            : endLine + 1,
+      reason: `data-tn=${value}`,
+    };
   }
 
   for (const hint of parseFiberHints(change.anchor?.reactFiberHint)) {
-    if (hint === fileStem) continue;
-    const line = findLineWithFiberComponent(lines, hint);
-    if (line !== null) {
-      const endLine = findJsxElementEndLine(lines, line);
-      return {
-        insertAtLine:
-          position === "before"
-            ? line
-            : position === "inside"
-              ? line + 1
-              : endLine + 1,
-        reason: `fiber component <${hint}>`,
-      };
-    }
+    const line = findJsxElementStartLine(lines, relativePath, {
+      fiberHints: [hint],
+    });
+    if (line === null) continue;
+
+    const endLine = findJsxElementEndLine(lines, line);
+    return {
+      insertAtLine:
+        position === "before"
+          ? line
+          : position === "inside"
+            ? line + 1
+            : endLine + 1,
+      reason: `fiber component <${hint}>`,
+    };
   }
 
-  const textLine = findLineWithUniqueText(
-    lines,
-    change.before.textContent ?? "",
-  );
+  const textLine = findJsxElementStartLine(lines, relativePath, {
+    textContent: change.before.textContent ?? "",
+  });
   if (textLine !== null) {
     const endLine = findJsxElementEndLine(lines, textLine);
     return {
@@ -195,20 +91,21 @@ export const findAnchorInsertLine = (
   }
 
   for (const hint of parseFiberHints(change.target.reactFiberHint)) {
-    if (hint === fileStem) continue;
-    const line = findLineWithFiberComponent(lines, hint);
-    if (line !== null) {
-      const endLine = findJsxElementEndLine(lines, line);
-      return {
-        insertAtLine:
-          position === "before"
-            ? line
-            : position === "inside"
-              ? line + 1
-              : endLine + 1,
-        reason: `target fiber <${hint}>`,
-      };
-    }
+    const line = findJsxElementStartLine(lines, relativePath, {
+      fiberHints: [hint],
+    });
+    if (line === null) continue;
+
+    const endLine = findJsxElementEndLine(lines, line);
+    return {
+      insertAtLine:
+        position === "before"
+          ? line
+          : position === "inside"
+            ? line + 1
+            : endLine + 1,
+      reason: `target fiber <${hint}>`,
+    };
   }
 
   return null;

@@ -96,7 +96,7 @@ describe("applyClassNameEdits", () => {
         }),
       ]);
 
-      expect(modified.length).toBe(1);
+      expect(modified.modifiedPaths).toHaveLength(1);
       const updated = readFileSync(titlePath, "utf-8");
       expect(updated).toContain("dibsCss.textBlue600");
       expect(updated).not.toContain("dibsCss.textSatan");

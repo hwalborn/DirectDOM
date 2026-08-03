@@ -70,7 +70,7 @@ describe("applyStylingEdits", () => {
         }),
       ]);
 
-      expect(modified).toContain(cssPath);
+      expect(modified.modifiedPaths).toContain(cssPath);
       expect(readFileSync(cssPath, "utf-8")).toContain("color: #436b93");
       expect(readFileSync(tsxPath, "utf-8")).toContain("styles.title");
     } finally {
@@ -112,12 +112,123 @@ describe("applyStylingEdits", () => {
         }),
       ]);
 
-      expect(modified).toContain(titlePath);
+      expect(modified.modifiedPaths).toContain(titlePath);
       const updated = readFileSync(titlePath, "utf-8");
       expect(updated).toContain(
         "classnames(dibsCss.truncate, dibsCss.textBlue600)",
       );
       expect(updated).not.toContain("classNames(");
+    } finally {
+      writeFileSync(titlePath, original, "utf-8");
+    }
+  });
+
+  it("adds inline style when no dibs-css class matches", () => {
+    const titlePath = join(
+      FIXTURE_REPO,
+      "packages/dibs-buyer-product-tile/src/ProductTitleLowercase.tsx",
+    );
+    const original = readFileSync(titlePath, "utf-8");
+
+    try {
+      const result = applyStylingEdits(FIXTURE_REPO, [
+        baseRecord({
+          id: "custom-inline-style",
+          intent: "make text a custom coral",
+          target: {
+            selector: '[data-tn="product-title-lowercase"]',
+            reactFiberHint: "ProductTitleLowercase",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: {
+            tagName: "H2",
+            className: "dc-truncate",
+          },
+          after: {
+            tagName: "H2",
+            className: "dc-truncate",
+            computedStyles: { color: "rgb(255, 99, 71)" },
+          },
+          patch: {
+            type: "inlineStyle",
+            value: { color: "#ff6347" },
+            mode: "merge",
+          },
+        }),
+      ]);
+
+      expect(result.appliedChangeIds).toContain("custom-inline-style");
+      expect(result.modifiedPaths).toContain(titlePath);
+      const updated = readFileSync(titlePath, "utf-8");
+      expect(updated).toContain("style={{ color: '#ff6347' }}");
+    } finally {
+      writeFileSync(titlePath, original, "utf-8");
+    }
+  });
+
+  it("applies multiple styling changes to the same target independently", () => {
+    const titlePath = join(
+      FIXTURE_REPO,
+      "packages/dibs-buyer-product-tile/src/ProductTitle.tsx",
+    );
+    const original = readFileSync(titlePath, "utf-8");
+
+    try {
+      const result = applyStylingEdits(FIXTURE_REPO, [
+        baseRecord({
+          id: "change-color",
+          target: {
+            selector: '[data-tn="product-title"]',
+            reactFiberHint: "ProductTitle",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: {
+            tagName: "H2",
+            textContent: "Vintage chair",
+            className: "dc-textSatan dc-truncate dc-textBlue600",
+          },
+          after: {
+            tagName: "H2",
+            textContent: "Vintage chair",
+            className: "dc-textBlue600 dc-truncate dc-textBlue600",
+          },
+          patch: { type: "className", value: "dc-textBlue600", mode: "merge" },
+        }),
+        baseRecord({
+          id: "change-custom-padding",
+          intent: "add custom top padding",
+          target: {
+            selector: '[data-tn="product-title"]',
+            reactFiberHint: "ProductTitle",
+            boundingBox: { x: 0, y: 0, width: 10, height: 10 },
+          },
+          before: {
+            tagName: "H2",
+            textContent: "Vintage chair",
+            className: "dc-textBlue600 dc-truncate dc-textBlue600",
+          },
+          after: {
+            tagName: "H2",
+            textContent: "Vintage chair",
+            className: "dc-textBlue600 dc-truncate dc-textBlue600",
+            computedStyles: { paddingTop: "12px" },
+          },
+          patch: {
+            type: "inlineStyle",
+            value: { paddingTop: "12px" },
+            mode: "merge",
+          },
+        }),
+      ]);
+
+      expect(result.appliedChangeIds).toEqual([
+        "change-color",
+        "change-custom-padding",
+      ]);
+      const updated = readFileSync(titlePath, "utf-8");
+      expect(updated).toContain("dibsCss.textBlue600");
+      expect(updated).not.toContain("dibsCss.textSatan");
+      expect(updated).toContain("paddingTop: 12px");
     } finally {
       writeFileSync(titlePath, original, "utf-8");
     }

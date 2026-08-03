@@ -177,6 +177,8 @@ const handleSend = async (): Promise<void> => {
         })) as { changeRecord?: ChangeRecord };
 
         if (result?.changeRecord) {
+          selectedSnapshot = result.changeRecord.after;
+          selectedSelector = result.changeRecord.target.selector;
           await apiFetch(`/sessions/${session.id}/ledger`, {
             method: "POST",
             body: JSON.stringify({ record: result.changeRecord }),

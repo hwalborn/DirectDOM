@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ChangeRecord } from "@directdom/shared";
+import { findJsxElementEndLine } from "./jsx-source-location.js";
 import {
   domHtmlToJsx,
   findAnchorInsertLine,
-  findJsxElementEndLine,
   insertJsxAtLine,
 } from "./apply-structural-edits.js";
 import { detectComponentStyleContext } from "./component-style-context.js";

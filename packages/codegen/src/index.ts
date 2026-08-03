@@ -187,6 +187,7 @@ ${
     : ""
 }
 - For styling patches (className or inlineStyle preview), map inline values back to dibsCss.<key> when possible. If the component imports a *.module.css file, update the relevant rule in that CSS file instead of adding inline styles to JSX.
+- When no dibs-css class matches the requested style, add style={{ ... }} on the matching JSX element in the component source.
 - Prefer dibsCss.<key> / classNames(...) over raw "dc-*" class strings. DOM classes use a "dc-" prefix; source uses dibsCss without that prefix (e.g. dc-textBlue600 → dibsCss.textBlue600).
 - For textContent patches, preserve the existing localization architecture. Update the relevant translation message, copy-producing function, or interpolated value; do not replace rendered text blindly across source files.
 - Apply the ledger patches as minimal source changes; return the full updated file content for each edited path.
@@ -403,7 +404,7 @@ export const runCodegen = async (
     };
   }
 
-  const modifiedByClassName = applyStylingEdits(
+  const stylingResult = applyStylingEdits(
     ferrumPath,
     session.ledger,
     session.pageUrl,
@@ -416,7 +417,10 @@ export const runCodegen = async (
   );
 
   const ferrumFiles: Array<{ path: string; content: string }> = [
-    ...new Set([...modifiedByClassName, ...structuralResult.modifiedPaths]),
+    ...new Set([
+      ...stylingResult.modifiedPaths,
+      ...structuralResult.modifiedPaths,
+    ]),
   ].map((absPath) => ({
     path: absPath.replace(ferrumPath + "/", ""),
     content: readFileSync(absPath, "utf-8"),
@@ -429,10 +433,11 @@ export const runCodegen = async (
   const isInsertChange = (change: (typeof session.ledger)[number]): boolean =>
     change.patch.type === "insertElement";
 
+  const appliedStylingIds = new Set(stylingResult.appliedChangeIds);
   const appliedStructuralIds = new Set(structuralResult.appliedChangeIds);
 
   const changesForLlm = session.ledger.filter((change) => {
-    if (isCodegenClassEdit(change) && modifiedByClassName.length > 0) {
+    if (isCodegenClassEdit(change) && appliedStylingIds.has(change.id)) {
       return false;
     }
     if (isInsertChange(change) && appliedStructuralIds.has(change.id)) {
@@ -442,7 +447,7 @@ export const runCodegen = async (
   });
   let generatedLlmEdits =
     structuralResult.appliedChangeIds.length > 0 ||
-    modifiedByClassName.length > 0;
+    stylingResult.appliedChangeIds.length > 0;
 
   if (changesForLlm.length > 0) {
     try {
