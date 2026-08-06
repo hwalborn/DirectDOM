@@ -31,9 +31,15 @@ const manifest: ManifestV3Export = {
   },
   action: {
     default_title: "Open DirectDOM",
+    default_icon: {
+      "16": "public/icon-16.png",
+      "32": "public/icon-32.png",
+      "48": "public/icon-48.png",
+    },
   },
   icons: {
     "16": "public/icon-16.png",
+    "32": "public/icon-32.png",
     "48": "public/icon-48.png",
     "128": "public/icon-128.png",
   },
